@@ -1134,6 +1134,11 @@ textarea.form-control {
   .view-section.active {
     display: flex !important;
   }
+  .map-container.view-section.active {
+    display: block !important;
+    position: relative !important;
+    height: 100% !important;
+  }
   .mobile-bottom-nav {
     display: flex;
   }

@@ -41,6 +41,7 @@ class AppController {
 
     // 4. Render Sidebar Feed & Map Markers
     this.applyFiltersAndRender();
+    this.switchView('list');
 
     // 5. Register PWA (only on http/https protocols)
     if (location.protocol.startsWith('http')) {
@@ -115,6 +116,9 @@ class AppController {
     document.getElementById('exportDataBtn')?.addEventListener('click', () => window.propertyDB.exportJSON());
     document.getElementById('importDataBtn')?.addEventListener('click', () => document.getElementById('importFileInput')?.click());
     document.getElementById('importFileInput')?.addEventListener('change', (e) => this.handleFileImport(e));
+
+    // Resize listener to re-evaluate mobile vs desktop split view
+    window.addEventListener('resize', () => this.switchView(this.currentView));
 
     // Install PWA button
     document.getElementById('installPwaBtn')?.addEventListener('click', () => {
@@ -521,7 +525,7 @@ class AppController {
 
     if (isMobile) {
       if (listView) listView.style.display = viewName === 'list' ? 'flex' : 'none';
-      if (mapView) mapView.style.display = viewName === 'map' ? 'flex' : 'none';
+      if (mapView) mapView.style.display = viewName === 'map' ? 'block' : 'none';
       if (matchView) matchView.style.display = viewName === 'match' ? 'flex' : 'none';
     } else {
       if (viewName === 'match') {
@@ -530,13 +534,14 @@ class AppController {
         if (matchView) matchView.style.display = 'flex';
       } else {
         if (listView) listView.style.display = 'flex';
-        if (mapView) mapView.style.display = 'flex';
+        if (mapView) mapView.style.display = 'block';
         if (matchView) matchView.style.display = 'none';
       }
     }
 
-    if (viewName === 'map' && window.mapController && window.mapController.map) {
-      setTimeout(() => window.mapController.map.invalidateSize(), 200);
+    if (window.mapController && window.mapController.map) {
+      setTimeout(() => window.mapController.map.invalidateSize(), 100);
+      setTimeout(() => window.mapController.map.invalidateSize(), 300);
     }
 
     if (viewName === 'match') {
