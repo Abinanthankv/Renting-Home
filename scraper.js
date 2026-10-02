@@ -56,6 +56,56 @@ class ListingScraper {
     }
   }
 
+  getHeuristicMetrics(bhkStr, sqftInput) {
+    let bhkCount = 0;
+    if (bhkStr) {
+      const match = String(bhkStr).match(/(\d+)/);
+      if (match) bhkCount = parseInt(match[1], 10);
+    }
+    
+    if (!bhkCount && sqftInput) {
+      const sq = parseInt(sqftInput, 10);
+      if (sq <= 750) bhkCount = 1;
+      else if (sq <= 1100) bhkCount = 2;
+      else if (sq <= 1600) bhkCount = 3;
+      else bhkCount = 4;
+    }
+
+    if (!bhkCount) bhkCount = 2; // default 2 BHK if nothing given
+
+    let defaultRent = 22000;
+    let defaultSqft = 1000;
+
+    switch (bhkCount) {
+      case 1:
+        defaultRent = 16000;
+        defaultSqft = 700;
+        break;
+      case 2:
+        defaultRent = 22000;
+        defaultSqft = 1000;
+        break;
+      case 3:
+        defaultRent = 35000;
+        defaultSqft = 1500;
+        break;
+      case 4:
+      default:
+        defaultRent = 50000;
+        defaultSqft = 2000;
+        break;
+    }
+
+    const finalSqft = (sqftInput && parseInt(sqftInput, 10) > 0) ? parseInt(sqftInput, 10) : defaultSqft;
+    
+    return {
+      bhk: `${bhkCount} BHK`,
+      rent: defaultRent,
+      deposit: defaultRent * 3, // standard 3 months deposit
+      sqft: finalSqft
+    };
+  }
+
   parseFromUrlSlug(url) {
     const isNoBroker = url.includes('nobroker.in');
     const is99acres = url.includes('99acres.com');
@@ -67,27 +117,37 @@ class ListingScraper {
     
     // Clean title
     let title = slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    title = title.replace(/\bRs\b/gi, '₹').replace(/Spid T\d+/i, '');
+    title = title.replace(/\bRs\b/gi, '₹').replace(/Spid[ -]?\w+/i, '').trim();
 
     // Extract BHK
-    const bhkMatch = url.match(/(\d+)[ -]bhk/i) || url.match(/(\d+)[ -]rk/i);
-    const bhk = bhkMatch ? `${bhkMatch[1]} BHK` : '2 BHK';
-
-    // Extract Rent
-    const rentMatch = url.match(/for-rs-?(\d+)/i) || url.match(/rs-?(\d+)/i);
-    const rent = rentMatch ? parseInt(rentMatch[1], 10) : (isNoBroker ? 13500 : 50000);
+    const bhkMatch = url.match(/(\d+)[ -]?bhk/i) || url.match(/(\d+)[ -]?rk/i);
+    const bhkRaw = bhkMatch ? `${bhkMatch[1]} BHK` : null;
 
     // Extract Sqft
-    const sqftMatch = url.match(/(\d+)-?sqft/i);
-    const sqft = sqftMatch ? parseInt(sqftMatch[1], 10) : 850;
+    const sqftMatch = url.match(/(\d+)-?sqft/i) || url.match(/(\d+)-?sq-?ft/i);
+    const sqftParsed = sqftMatch ? parseInt(sqftMatch[1], 10) : null;
+
+    // Get smart heuristic defaults for BHK/Rent/Deposit/Sqft
+    const metrics = this.getHeuristicMetrics(bhkRaw, sqftParsed);
+
+    // Extract Rent if explicitly present in URL slug (e.g., for-rs-15000 or rs-16000)
+    const rentMatch = url.match(/for-rs-?(\d+)/i) || url.match(/rs-?(\d+)/i) || url.match(/rent-?(\d+)/i);
+    const rent = rentMatch ? parseInt(rentMatch[1], 10) : metrics.rent;
+    const deposit = rentMatch ? rent * 3 : metrics.deposit;
+    const bhk = bhkRaw || metrics.bhk;
+    const sqft = sqftParsed || metrics.sqft;
 
     // Detect locality and coordinates
     const lowerUrl = url.toLowerCase();
-    let locality = 'Chennai';
+    let locality = 'Chennai South';
     let lat = 12.9210;
     let lng = 80.1012;
 
-    if (lowerUrl.includes('perungalathur')) {
+    if (lowerUrl.includes('ssm-nagar') || lowerUrl.includes('ssm_nagar') || lowerUrl.includes('ssm nagar')) {
+      locality = 'SSM Nagar, Perungalathur';
+      lat = 12.9025;
+      lng = 80.0785;
+    } else if (lowerUrl.includes('perungalathur')) {
       locality = lowerUrl.includes('old-perungalathur') ? 'Old Perungalathur' : 'New Perungalathur';
       lat = 12.9049;
       lng = 80.0846;
@@ -103,6 +163,14 @@ class ListingScraper {
       locality = 'Chromepet';
       lat = 12.9522;
       lng = 80.1410;
+    } else if (lowerUrl.includes('guduvancheri') || lowerUrl.includes('guduvancherry')) {
+      locality = 'Guduvancheri';
+      lat = 12.8439;
+      lng = 80.0597;
+    } else if (lowerUrl.includes('vandalur')) {
+      locality = 'Vandalur';
+      lat = 12.8904;
+      lng = 80.0815;
     }
 
     const defaultPhoto = isNoBroker 
@@ -114,7 +182,7 @@ class ListingScraper {
       source,
       title: title || `${bhk} Rental Property in ${locality}`,
       rent,
-      deposit: rent * 5,
+      deposit,
       maintenance: 1000,
       sqft,
       bhk,
@@ -257,37 +325,46 @@ class ListingScraper {
     }
 
     if (schemaData) {
-      const lat = parseFloat(schemaData.geo?.latitude || 12.9172);
-      const lng = parseFloat(schemaData.geo?.longitude || 80.0891);
-      const rent = rentPrice || parseInt(this.extractRegex(html, /₹\s*([0-9,]+)/i)?.replace(/,/g, '') || '50000', 10);
-      const deposit = parseInt(this.extractRegex(html, /deposit:?\s*([0-9,]+)/i)?.replace(/,/g, '') || (rent * 6).toString(), 10);
+      const bhkStr = schemaData.numberOfRooms ? `${schemaData.numberOfRooms} BHK` : (this.extractRegex(html, /(\d+)\s*bhk/i) ? `${this.extractRegex(html, /(\d+)\s*bhk/i)} BHK` : null);
+      const sqftParsed = schemaData.floorSize ? parseInt(schemaData.floorSize, 10) : parseInt(this.extractRegex(html, /([0-9,]+)\s*sq/i)?.replace(/,/g, '') || '0', 10);
+      const metrics = this.getHeuristicMetrics(bhkStr, sqftParsed);
+
+      const lat = parseFloat(schemaData.geo?.latitude || 12.9049);
+      const lng = parseFloat(schemaData.geo?.longitude || 80.0846);
+      const rent = rentPrice || parseInt(this.extractRegex(html, /₹\s*([0-9,]+)/i)?.replace(/,/g, '') || '0', 10) || metrics.rent;
+      const deposit = parseInt(this.extractRegex(html, /deposit:?\s*([0-9,]+)/i)?.replace(/,/g, '') || '0', 10) || metrics.deposit;
 
       listings.push({
         id: `acres_${Date.now()}`,
         source: '99acres',
-        title: schemaData.name || schemaData.description?.split('\n')[0] || '4 BHK Villa for Rent in Old Perungalathur',
+        title: schemaData.name || schemaData.description?.split('\n')[0] || `${metrics.bhk} Apartment for Rent in ${schemaData.address?.streetAddress || 'Perungalathur'}`,
         rent,
         deposit,
         maintenance: 1500,
-        sqft: parseInt(schemaData.floorSize || '1340', 10),
-        bhk: `${schemaData.numberOfRooms || 4} BHK`,
+        sqft: sqftParsed || metrics.sqft,
+        bhk: bhkStr || metrics.bhk,
         furnishing: 'Semi-Furnished',
         preferredTenant: 'Family / Working Professionals',
-        locality: schemaData.address?.streetAddress || 'Old Perungalathur',
-        address: `${schemaData.address?.streetAddress || 'Old Perungalathur'}, ${schemaData.address?.addressLocality || 'Chennai South'}`,
+        locality: schemaData.address?.streetAddress || 'Perungalathur',
+        address: `${schemaData.address?.streetAddress || 'Perungalathur'}, ${schemaData.address?.addressLocality || 'Chennai South'}`,
         latitude: lat,
         longitude: lng,
         landlordName,
         description: schemaData.description || 'Property listing from 99acres.',
-        photos: schemaData.image ? [schemaData.image] : ['https://static.99acres.com/favicon.png'],
+        photos: schemaData.image ? (Array.isArray(schemaData.image) ? schemaData.image : [schemaData.image]) : ['https://static.99acres.com/favicon.png'],
         url: url || 'https://www.99acres.com',
         createdAt: Date.now()
       });
     } else {
       // Method 2: Generic fallback regex extraction
       const title = this.extractRegex(html, /<title[^>]*>(.*?)<\/title>/i) || 'Rental Property in Chennai';
-      const rent = parseInt(this.extractRegex(html, /₹\s*([0-9,]+)/i)?.replace(/,/g, '') || '20000', 10);
-      const deposit = parseInt(this.extractRegex(html, /([0-9,]+)\s*(?:deposit|security)/i)?.replace(/,/g, '') || (rent * 4).toString(), 10);
+      const bhkMatch = html.match(/(\d+)\s*bhk/i) || (url ? url.match(/(\d+)[ -]?bhk/i) : null);
+      const bhkStr = bhkMatch ? `${bhkMatch[1]} BHK` : null;
+      const sqftParsed = parseInt(this.extractRegex(html, /([0-9,]+)\s*sq/i)?.replace(/,/g, '') || '0', 10);
+      const metrics = this.getHeuristicMetrics(bhkStr, sqftParsed);
+
+      const rent = parseInt(this.extractRegex(html, /₹\s*([0-9,]+)/i)?.replace(/,/g, '') || '0', 10) || metrics.rent;
+      const deposit = parseInt(this.extractRegex(html, /([0-9,]+)\s*(?:deposit|security)/i)?.replace(/,/g, '') || '0', 10) || metrics.deposit;
 
       listings.push({
         id: `acres_${Date.now()}`,
@@ -296,14 +373,14 @@ class ListingScraper {
         rent,
         deposit,
         maintenance: 0,
-        sqft: parseInt(this.extractRegex(html, /([0-9,]+)\s*sq/i)?.replace(/,/g, '') || '800', 10),
-        bhk: '2 BHK',
+        sqft: sqftParsed || metrics.sqft,
+        bhk: bhkStr || metrics.bhk,
         furnishing: 'Semi-Furnished',
         preferredTenant: 'All',
         locality: 'Chennai South',
         address: 'Chennai South, Tamil Nadu',
-        latitude: 12.9172,
-        longitude: 80.0891,
+        latitude: 12.9049,
+        longitude: 80.0846,
         description: 'Listing imported from 99acres.',
         photos: ['https://static.99acres.com/favicon.png'],
         url: url || 'https://www.99acres.com',
