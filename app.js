@@ -13,6 +13,7 @@ class AppController {
     this.currentView = 'list';
     this.weights = { rent: 40, space: 30, transit: 20, deposit: 10 };
     this.selectedForComparison = new Set();
+    this.selectedWorkplace = 'none';
   }
 
   async init() {
@@ -117,6 +118,12 @@ class AppController {
     document.getElementById('importDataBtn')?.addEventListener('click', () => document.getElementById('importFileInput')?.click());
     document.getElementById('importFileInput')?.addEventListener('change', (e) => this.handleFileImport(e));
 
+    // Workplace Destination Select Listener
+    document.getElementById('workplaceSelect')?.addEventListener('change', (e) => {
+      this.selectedWorkplace = e.target.value;
+      this.applyFiltersAndRender();
+    });
+
     // Resize listener to re-evaluate mobile vs desktop split view
     window.addEventListener('resize', () => this.switchView(this.currentView));
 
@@ -174,6 +181,7 @@ class AppController {
       const isSelected = this.selectedProperty && this.selectedProperty.id === prop.id;
       const sourceClass = prop.source === 'NoBroker' ? 'source-nobroker' : (prop.source === '99acres' ? 'source-99acres' : 'source-custom');
       const thumb = prop.photos && prop.photos.length ? prop.photos[0] : 'https://cdn-icons-png.flaticon.com/512/609/609803.png';
+      const commute = this.calculateCommuteInfo(prop);
 
       return `
         <div class="property-card ${isSelected ? 'selected' : ''}" onclick="window.app.selectProperty('${prop.id}')">
@@ -187,6 +195,11 @@ class AppController {
             <div class="card-address" onclick="event.stopPropagation(); window.open('https://www.google.com/maps/search/?api=1&query=${prop.latitude},${prop.longitude}', '_blank')" title="Open location in Google Maps">
               <i data-lucide="map-pin"></i> ${prop.locality || prop.address} <span class="gmaps-arrow">↗</span>
             </div>
+            ${commute ? `
+              <div style="margin: 4px 0;">
+                <span class="commute-tag-pill">${commute.statusClass} ${commute.driveMins}m Drive (${commute.trainMins}m Train) to ${commute.targetName}</span>
+              </div>
+            ` : ''}
             <div class="card-specs">
               <span class="spec-item"><i data-lucide="home"></i> ${prop.bhk}</span>
               <span class="spec-item"><i data-lucide="maximize"></i> ${prop.sqft} sqft</span>
@@ -305,12 +318,18 @@ class AppController {
         </div>
       </div>
 
-      <div style="background-color:var(--bg-card); padding:14px; border-radius:var(--radius-md); border:1px solid var(--border-color);">
+      <!-- Smart Negotiation Assistant Card -->
+      ${this.renderNegotiationCard(prop)}
+
+      <!-- Physical House Visit Inspection Checklist -->
+      ${this.renderInspectionChecklist(prop)}
+
+      <div style="background-color:var(--bg-card); padding:14px; border-radius:var(--radius-md); border:1px solid var(--border-color); margin-top:14px;">
         <h4 style="font-size:0.85rem; font-weight:700; margin-bottom:6px;">Description / Highlights</h4>
         <p style="font-size:0.8rem; color:var(--text-muted); line-height:1.5;">${prop.description}</p>
       </div>
 
-      <div style="display:flex; gap:10px; margin-top:10px;">
+      <div style="display:flex; gap:10px; margin-top:14px;">
         <a href="${prop.url}" target="_blank" rel="noopener" class="btn btn-primary" style="flex:1; justify-content:center; text-decoration:none;">
           <i data-lucide="external-link"></i> Open Original Listing
         </a>
@@ -817,6 +836,124 @@ class AppController {
 
   closeComparisonModal() {
     document.getElementById('comparisonModal')?.classList.remove('active');
+  }
+
+  calculateCommuteInfo(prop) {
+    if (!this.selectedWorkplace || this.selectedWorkplace === 'none') return null;
+
+    const presets = {
+      dlf: { name: 'DLF Porur', lat: 13.0232, lng: 80.1650, trainStn: 'Guindy' },
+      tidel: { name: 'TIDEL Park OMR', lat: 12.9892, lng: 80.2483, trainStn: 'Thiruvanmiyur' },
+      olympia: { name: 'Olympia Guindy', lat: 13.0102, lng: 80.2030, trainStn: 'Guindy' },
+      siruseri: { name: 'Siruseri IT Park', lat: 12.8277, lng: 80.2185, trainStn: 'Vandalur' },
+      mcc: { name: 'MCC Tambaram', lat: 12.9249, lng: 80.1200, trainStn: 'Tambaram' }
+    };
+
+    const target = presets[this.selectedWorkplace];
+    if (!target) return null;
+
+    const distKm = Math.sqrt(Math.pow(prop.latitude - target.lat, 2) + Math.pow(prop.longitude - target.lng, 2)) * 111;
+    const driveMins = Math.round(distKm * 2.2 + 8);
+    const trainMins = Math.round(18 + distKm * 1.2);
+
+    let statusClass = '🟢';
+    if (driveMins > 45) statusClass = '🔴';
+    else if (driveMins > 30) statusClass = '🟡';
+
+    return {
+      targetName: target.name,
+      distKm: distKm.toFixed(1),
+      driveMins,
+      trainMins,
+      statusClass
+    };
+  }
+
+  renderNegotiationCard(prop) {
+    const counterRent = Math.round((prop.rent * 0.93) / 500) * 500;
+    const counterDeposit = Math.max(24000, prop.rent * 3);
+    const depositSavings = Math.max(0, prop.deposit - counterDeposit);
+    const rentSavingsAnnual = Math.max(0, (prop.rent - counterRent) * 12);
+    const depRatio = (prop.deposit / Math.max(1, prop.rent)).toFixed(1);
+
+    const textToCopy = `Hi, I saw your rental listing "${prop.title}". I am interested in viewing it. Based on current market rates in ${prop.locality}, I would like to offer ₹${counterRent.toLocaleString()}/mo rent with ₹${counterDeposit.toLocaleString()} (3 months) deposit. Ready to finalize immediately. Let me know when I can visit!`;
+    const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(textToCopy)}`;
+
+    return `
+      <div class="negotiation-card">
+        <div class="negotiation-title">
+          <i data-lucide="sparkles"></i> Smart Negotiation Assistant & Counter-Offer
+        </div>
+        <div class="negotiation-offer-grid">
+          <div class="offer-box">
+            <div class="offer-val">₹${counterRent.toLocaleString()}/mo</div>
+            <div class="offer-label">Target Rent (Save ₹${rentSavingsAnnual.toLocaleString()}/yr)</div>
+          </div>
+          <div class="offer-box">
+            <div class="offer-val">₹${counterDeposit.toLocaleString()}</div>
+            <div class="offer-label">Target Deposit (${depositSavings > 0 ? 'Save ₹' + depositSavings.toLocaleString() + ' cash lock' : '3x Rent'})</div>
+          </div>
+        </div>
+        <ul style="font-size:0.75rem; color:var(--text-muted); margin-bottom:10px; padding-left:14px; line-height:1.5;">
+          <li>Deposit requested is ${depRatio}x rent. Standard for ${prop.locality} is 3x (₹${counterDeposit.toLocaleString()}).</li>
+          <li>Fair carpet area rate for ${prop.sqft} sqft in ${prop.locality} is ~₹${counterRent.toLocaleString()}/mo.</li>
+        </ul>
+        <a href="${whatsappUrl}" target="_blank" class="whatsapp-btn">
+          <i data-lucide="message-square"></i> Send Counter-Offer on WhatsApp
+        </a>
+      </div>
+    `;
+  }
+
+  renderInspectionChecklist(prop) {
+    const saved = JSON.parse(localStorage.getItem(`inspection_checklist_${prop.id}`) || '{}');
+
+    const items = [
+      { id: 'water', label: '🚰 Water & Plumbing (Metro / Tanker pressure ok)' },
+      { id: 'eb', label: '⚡ Separate EB Meter & 3-Phase Connection' },
+      { id: 'inverter', label: '🔌 Inverter / DG Backup Ready' },
+      { id: 'signal', label: '📶 Mobile 4G/5G Signal (Jio/Airtel 4+ bars in rooms)' },
+      { id: 'wifi', label: '🌐 Fiber Broadband Ready (Jio/Airtel Fiber in building)' },
+      { id: 'parking', label: '🚗 Covered Car / Bike Parking Slot Width' },
+      { id: 'sunlight', label: '🌞 Natural Sunlight & Cross Ventilation' },
+      { id: 'flood', label: '🌧️ Monsoon Waterlogging & Flood Safety' },
+      { id: 'safety', label: '🚪 Main Door Safety Locks & Window Grills' }
+    ];
+
+    const passedCount = items.filter(i => saved[i.id]).length;
+
+    return `
+      <div class="inspection-card">
+        <div style="display:flex; align-items:center; justify-content:space-between;">
+          <h4 style="font-size:0.85rem; font-weight:700; color:var(--text-main); display:flex; align-items:center; gap:6px;">
+            <i data-lucide="clipboard-check" style="color:var(--primary);"></i> House Visit Inspection Checklist
+          </h4>
+          <span style="font-size:0.75rem; font-weight:800; color:var(--primary); background:var(--primary-light); padding:2px 8px; border-radius:10px;">
+            ${passedCount} / ${items.length} Passed
+          </span>
+        </div>
+
+        <div class="checklist-items-grid">
+          ${items.map(item => `
+            <label class="checklist-item-row">
+              <input type="checkbox" ${saved[item.id] ? 'checked' : ''} onchange="window.app.toggleInspectionCheckitem('${prop.id}', '${item.id}', this.checked)" />
+              <span>${item.label}</span>
+            </label>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  toggleInspectionCheckitem(propId, itemId, isChecked) {
+    const cacheKey = `inspection_checklist_${propId}`;
+    const saved = JSON.parse(localStorage.getItem(cacheKey) || '{}');
+    saved[itemId] = isChecked;
+    localStorage.setItem(cacheKey, JSON.stringify(saved));
+
+    if (this.selectedProperty && this.selectedProperty.id === propId) {
+      this.selectProperty(propId);
+    }
   }
 }
 
