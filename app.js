@@ -37,6 +37,33 @@ class AppController {
 
       this.allProperties = await window.propertyDB.getAll();
 
+      // Refresh any legacy cached listings in DB that contain placeholder photos or 0 sqft
+      let dbUpdated = false;
+      if (this.allProperties && this.allProperties.length > 0) {
+        for (const prop of this.allProperties) {
+          const isPlaceholderPhoto = prop.photos && prop.photos[0] && (prop.photos[0].includes('unsplash') || prop.photos[0].includes('flaticon'));
+          const isMissingSpecs = prop.sqft === 0 || prop.deposit === (prop.rent * 3);
+          if (prop.source === 'NoBroker' && (isPlaceholderPhoto || isMissingSpecs)) {
+            if (prop.url && prop.url !== '#') {
+              try {
+                const freshItems = await window.listingScraper.parseUrlOrPayload(prop.url);
+                if (freshItems && freshItems.length > 0 && freshItems[0].latitude && freshItems[0].latitude !== 0) {
+                  if (freshItems[0].id !== prop.id) {
+                    await window.propertyDB.delete(prop.id);
+                  }
+                  await window.propertyDB.save(freshItems[0]);
+                  dbUpdated = true;
+                }
+              } catch (err) {}
+            }
+          }
+        }
+      }
+
+      if (dbUpdated || !this.allProperties || this.allProperties.length === 0) {
+        this.allProperties = await window.propertyDB.getAll();
+      }
+
       // Seed initial Bethel Iellam property if database is currently empty
       if (!this.allProperties || this.allProperties.length === 0) {
         const seeded = await window.listingScraper.parseUrlOrPayload('https://www.nobroker.in/property/1-bhk-apartment-for-rent-in-new-perungalathur-chennai-for-rs-10000/8a9fb1827b49e8e6017b4a14933216b1/detail?nbFr=list-rent');
@@ -483,6 +510,11 @@ class AppController {
       }
 
       for (const item of parsedItems) {
+        // Delete any old legacy cached properties matching URL or title
+        const legacyMatches = this.allProperties.filter(p => p.url === item.url || (p.locality === item.locality && (p.sqft === 0 || p.deposit === p.rent * 3)));
+        for (const legacy of legacyMatches) {
+          await window.propertyDB.delete(legacy.id);
+        }
         await window.propertyDB.save(item);
       }
 
