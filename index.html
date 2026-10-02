@@ -32,6 +32,18 @@
     </div>
 
     <div class="header-actions">
+      <button class="btn btn-secondary nav-tab-btn active" id="navTabList" onclick="window.app.switchView('list')">
+        <i data-lucide="list"></i>
+        <span>Feed</span>
+      </button>
+      <button class="btn btn-secondary nav-tab-btn" id="navTabMap" onclick="window.app.switchView('map')">
+        <i data-lucide="map"></i>
+        <span>Map</span>
+      </button>
+      <button class="btn btn-secondary nav-tab-btn match-tab-btn" id="navTabMatch" onclick="window.app.switchView('match')">
+        <i data-lucide="sparkles"></i>
+        <span>Best Match</span>
+      </button>
       <button class="btn btn-primary" id="openImportModalBtn">
         <i data-lucide="plus"></i>
         <span>Add Listing</span>
@@ -50,11 +62,11 @@
     </div>
   </header>
 
-  <!-- Main Split Layout -->
+  <!-- Main Multi-View Layout -->
   <main class="app-container">
 
-    <!-- Left Sidebar: Property Feed & Filters -->
-    <aside class="sidebar">
+    <!-- Left Sidebar: Property Feed & Filters (List View) -->
+    <aside class="sidebar view-section active" id="listView">
       <div class="filter-section">
         <div class="search-input-wrap">
           <i data-lucide="search"></i>
@@ -76,9 +88,57 @@
       </div>
     </aside>
 
-    <!-- Right Area: Interactive Map -->
-    <section class="map-container">
+    <!-- Map View Area -->
+    <section class="map-container view-section active" id="mapView">
       <div id="map"></div>
+    </section>
+
+    <!-- Best Match / Property AI Comparator Screen -->
+    <section class="match-container view-section" id="matchView" style="display: none;">
+      <div class="match-view-header">
+        <div class="match-view-title-wrap">
+          <h2 class="match-view-title"><i data-lucide="sparkles" style="color:var(--primary);"></i> Best Match AI Ranking & Comparator</h2>
+          <p class="match-view-subtitle">Ranks listed properties by rent economy, carpet area, deposit ratio, and proximity to railway stations.</p>
+        </div>
+        <div class="match-view-actions">
+          <button class="btn btn-secondary" id="toggleWeightsBtn" onclick="window.app.toggleWeightsPanel()">
+            <i data-lucide="sliders"></i> Adjust Weights
+          </button>
+          <button class="btn btn-primary" id="compareSelectedBtn" onclick="window.app.openComparisonModal()" disabled>
+            <i data-lucide="columns"></i> Compare Selected (0)
+          </button>
+        </div>
+      </div>
+
+      <!-- Interactive Weight Adjuster Panel -->
+      <div class="weights-panel" id="weightsPanel" style="display: none;">
+        <h4 style="font-size: 0.85rem; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+          <i data-lucide="sliders" style="color:var(--primary);"></i> Match Preference Weightings
+        </h4>
+        <div class="sliders-grid">
+          <div class="slider-group">
+            <div class="slider-header"><span>Rent Savings / Economy</span><span id="valWeightRent">40%</span></div>
+            <input type="range" min="10" max="70" value="40" class="weight-slider" id="sliderWeightRent" oninput="window.app.onWeightChange()" />
+          </div>
+          <div class="slider-group">
+            <div class="slider-header"><span>Carpet Area / Spaciousness</span><span id="valWeightSpace">30%</span></div>
+            <input type="range" min="10" max="70" value="30" class="weight-slider" id="sliderWeightSpace" oninput="window.app.onWeightChange()" />
+          </div>
+          <div class="slider-group">
+            <div class="slider-header"><span>Transit / Station Proximity</span><span id="valWeightTransit">20%</span></div>
+            <input type="range" min="0" max="50" value="20" class="weight-slider" id="sliderWeightTransit" oninput="window.app.onWeightChange()" />
+          </div>
+          <div class="slider-group">
+            <div class="slider-header"><span>Low Deposit Ratio</span><span id="valWeightDeposit">10%</span></div>
+            <input type="range" min="0" max="40" value="10" class="weight-slider" id="sliderWeightDeposit" oninput="window.app.onWeightChange()" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Best Match Feed & Ranking Grid -->
+      <div class="match-feed-grid" id="matchFeedGrid">
+        <!-- Ranked property cards inserted dynamically -->
+      </div>
     </section>
 
     <!-- Slide-over Property Detail Drawer -->
@@ -99,6 +159,43 @@
     </div>
 
   </main>
+
+  <!-- Side-by-Side Property Comparison Modal -->
+  <div class="modal-overlay" id="comparisonModal">
+    <div class="modal-card modal-card-lg">
+      <div class="modal-header">
+        <h3 style="font-size: 1.1rem; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+          <i data-lucide="columns" style="color: var(--primary);"></i> Side-by-Side Property Comparison
+        </h3>
+        <button class="btn btn-secondary btn-icon" onclick="window.app.closeComparisonModal()">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <div class="modal-body" id="comparisonModalBody">
+        <!-- Comparison table injected dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Mobile Bottom Navigation Bar (PWA) -->
+  <nav class="mobile-bottom-nav" id="mobileBottomNav">
+    <button class="mobile-nav-btn active" data-view="list" onclick="window.app.switchView('list')">
+      <i data-lucide="list"></i>
+      <span>Listings</span>
+    </button>
+    <button class="mobile-nav-btn" data-view="map" onclick="window.app.switchView('map')">
+      <i data-lucide="map"></i>
+      <span>Map</span>
+    </button>
+    <button class="mobile-nav-btn" data-view="match" onclick="window.app.switchView('match')">
+      <i data-lucide="sparkles"></i>
+      <span>Best Match</span>
+    </button>
+    <button class="mobile-nav-btn action-add" onclick="window.app.openImportModal()">
+      <i data-lucide="plus"></i>
+      <span>Add</span>
+    </button>
+  </nav>
 
   <!-- Scraper & Import Modal -->
   <div class="modal-overlay" id="importModal">

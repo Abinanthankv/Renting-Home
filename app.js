@@ -10,6 +10,9 @@ class AppController {
     this.searchQuery = '';
     this.currentPhotoIndex = 0;
     this.deferredPwaPrompt = null;
+    this.currentView = 'list';
+    this.weights = { rent: 40, space: 30, transit: 20, deposit: 10 };
+    this.selectedForComparison = new Set();
   }
 
   async init() {
@@ -495,6 +498,317 @@ class AppController {
       }
     };
     reader.readAsText(file);
+  }
+
+  switchView(viewName) {
+    this.currentView = viewName;
+    const isMobile = window.innerWidth <= 768;
+
+    // Update Header Navigation Tabs
+    document.querySelectorAll('.nav-tab-btn').forEach(btn => btn.classList.remove('active'));
+    if (viewName === 'list') document.getElementById('navTabList')?.classList.add('active');
+    if (viewName === 'map') document.getElementById('navTabMap')?.classList.add('active');
+    if (viewName === 'match') document.getElementById('navTabMatch')?.classList.add('active');
+
+    // Update Mobile Bottom Nav Buttons
+    document.querySelectorAll('.mobile-nav-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.getAttribute('data-view') === viewName);
+    });
+
+    const listView = document.getElementById('listView');
+    const mapView = document.getElementById('mapView');
+    const matchView = document.getElementById('matchView');
+
+    if (isMobile) {
+      if (listView) listView.style.display = viewName === 'list' ? 'flex' : 'none';
+      if (mapView) mapView.style.display = viewName === 'map' ? 'flex' : 'none';
+      if (matchView) matchView.style.display = viewName === 'match' ? 'flex' : 'none';
+    } else {
+      if (viewName === 'match') {
+        if (listView) listView.style.display = 'none';
+        if (mapView) mapView.style.display = 'none';
+        if (matchView) matchView.style.display = 'flex';
+      } else {
+        if (listView) listView.style.display = 'flex';
+        if (mapView) mapView.style.display = 'flex';
+        if (matchView) matchView.style.display = 'none';
+      }
+    }
+
+    if (viewName === 'map' && window.mapController && window.mapController.map) {
+      setTimeout(() => window.mapController.map.invalidateSize(), 200);
+    }
+
+    if (viewName === 'match') {
+      this.renderBestMatchView();
+    }
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  calculateMatchScores() {
+    if (!this.allProperties || this.allProperties.length === 0) return [];
+
+    const totalWeight = (this.weights.rent + this.weights.space + this.weights.transit + this.weights.deposit) || 100;
+
+    return this.allProperties.map(prop => {
+      // 1. Rent Economy Score
+      let benchmarkRent = 22000;
+      if (prop.bhk.includes('1')) benchmarkRent = 16000;
+      else if (prop.bhk.includes('2')) benchmarkRent = 22000;
+      else if (prop.bhk.includes('3')) benchmarkRent = 35000;
+      else if (prop.bhk.includes('4')) benchmarkRent = 50000;
+
+      const rentDiffRatio = (benchmarkRent - prop.rent) / benchmarkRent;
+      const rentScore = Math.max(0, Math.min(100, Math.round(50 + rentDiffRatio * 100)));
+
+      // 2. Carpet Area / Space Efficiency Score
+      const bhkNum = parseInt(prop.bhk, 10) || 1;
+      const sqftPerBhk = prop.sqft / bhkNum;
+      const spaceScore = Math.max(0, Math.min(100, Math.round((sqftPerBhk / 450) * 75)));
+
+      // 3. Deposit Score (3x rent = 100, 4x = 80, 5x = 60)
+      const depRatio = prop.deposit / Math.max(1, prop.rent);
+      let depositScore = 100;
+      if (depRatio > 3) depositScore = Math.max(0, Math.round(100 - (depRatio - 3) * 20));
+
+      // 4. Transit / Station Proximity Score
+      const distKm = Math.sqrt(Math.pow(prop.latitude - 12.9049, 2) + Math.pow(prop.longitude - 80.0846, 2)) * 111;
+      let transitScore = 95;
+      if (distKm > 1.5) transitScore = Math.max(40, Math.round(100 - distKm * 10));
+
+      const overallScore = Math.round(
+        (rentScore * this.weights.rent +
+         spaceScore * this.weights.space +
+         transitScore * this.weights.transit +
+         depositScore * this.weights.deposit) / totalWeight
+      );
+
+      // Highlights / Pros & Cons
+      const pros = [];
+      const cons = [];
+
+      if (prop.rent <= 16000) pros.push(`Budget Friendly (₹${prop.rent.toLocaleString()}/mo)`);
+      else if (prop.rent > 30000) cons.push(`Higher Rent (₹${prop.rent.toLocaleString()}/mo)`);
+
+      if (sqftPerBhk >= 500) pros.push(`Spacious Layout (${prop.sqft} sqft)`);
+      else cons.push(`Compact Area (${prop.sqft} sqft)`);
+
+      if (depRatio <= 3) pros.push(`Low Deposit (${depRatio.toFixed(1)}x Rent)`);
+      else if (depRatio >= 5) cons.push(`High Deposit (${depRatio.toFixed(1)}x Rent)`);
+
+      if (distKm <= 2) pros.push(`Close to Railway Station (${distKm.toFixed(1)} km)`);
+
+      return {
+        ...prop,
+        matchScore: overallScore,
+        rentScore,
+        spaceScore,
+        depositScore,
+        transitScore,
+        distKm: distKm.toFixed(1),
+        pros,
+        cons
+      };
+    }).sort((a, b) => b.matchScore - a.matchScore);
+  }
+
+  renderBestMatchView() {
+    const container = document.getElementById('matchFeedGrid');
+    if (!container) return;
+
+    const ranked = this.calculateMatchScores();
+
+    if (ranked.length === 0) {
+      container.innerHTML = `
+        <div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-muted);">
+          <i data-lucide="inbox" style="width: 48px; height: 48px; margin-bottom: 12px; opacity: 0.5;"></i>
+          <h3>No properties listed yet.</h3>
+          <p style="font-size: 0.85rem; margin-top: 6px;">Add property links or listings to calculate the Best Match scores.</p>
+        </div>
+      `;
+      if (window.lucide) window.lucide.createIcons();
+      return;
+    }
+
+    container.innerHTML = ranked.map((prop, idx) => {
+      const isTop = idx === 0;
+      const isChecked = this.selectedForComparison.has(prop.id);
+      
+      let badgeLabel = `#${idx + 1} RANKED`;
+      if (idx === 0) badgeLabel = '🏆 #1 TOP MATCH';
+      else if (idx === 1) badgeLabel = '⭐ #2 BEST VALUE';
+      else if (idx === 2) badgeLabel = '📍 #3 TOP LOCATION';
+
+      const thumb = prop.photos && prop.photos[0] ? prop.photos[0] : 'https://imagecdn.99acres.com/media1/42388/11/847771685O-1790470546077.jpg';
+      const scoreClass = prop.matchScore >= 80 ? 'high' : 'med';
+
+      return `
+        <div class="match-card ${isTop ? 'top-rank' : ''}">
+          <span class="match-rank-badge">${badgeLabel}</span>
+          <span class="match-score-pill ${scoreClass}">
+            <i data-lucide="sparkles" style="width:14px;height:14px;"></i> ${prop.matchScore}% Match
+          </span>
+
+          <div class="card-img-wrap" style="height:170px;">
+            <img src="${thumb}" alt="property" onerror="this.src='https://cdn-icons-png.flaticon.com/512/609/609803.png';" />
+            <span class="card-source-badge">${prop.source}</span>
+            <span class="card-price-badge">₹${prop.rent.toLocaleString()}/mo</span>
+          </div>
+
+          <div class="card-body" style="padding:14px; flex:1; display:flex; flex-direction:column;">
+            <h3 class="card-title" style="font-size:0.95rem; line-height:1.3; margin-bottom:6px;">${prop.title}</h3>
+            
+            <div class="card-address" onclick="event.stopPropagation(); window.open('https://www.google.com/maps/search/?api=1&query=${prop.latitude},${prop.longitude}', '_blank')" title="Open location in Google Maps">
+              <i data-lucide="map-pin"></i> ${prop.locality || prop.address} ↗
+            </div>
+
+            <div class="match-pros-cons">
+              ${prop.pros.map(p => `<span class="pro-tag"><i data-lucide="check-circle-2" style="width:12px;height:12px;"></i> ${p}</span>`).join('')}
+              ${prop.cons.map(c => `<span class="con-tag"><i data-lucide="alert-circle" style="width:12px;height:12px;"></i> ${c}</span>`).join('')}
+            </div>
+
+            <div class="card-specs" style="margin-top:auto; padding-top:10px;">
+              <span class="spec-item"><i data-lucide="home"></i> ${prop.bhk}</span>
+              <span class="spec-item"><i data-lucide="maximize"></i> ${prop.sqft} sqft</span>
+              <span class="spec-item"><i data-lucide="shield"></i> Dep: ₹${(prop.deposit/1000).toFixed(0)}k</span>
+            </div>
+
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-top:12px; padding-top:8px; border-top:1px solid var(--border-color);">
+              <label style="font-size:0.8rem; color:var(--text-muted); cursor:pointer; display:flex; align-items:center; gap:6px;">
+                <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="window.app.toggleCompareProperty('${prop.id}')" /> Compare
+              </label>
+              <button class="btn btn-secondary" onclick="window.app.selectProperty('${prop.id}')" style="font-size:0.75rem; padding:4px 10px;">
+                View Details
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  toggleWeightsPanel() {
+    const panel = document.getElementById('weightsPanel');
+    if (panel) {
+      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    }
+  }
+
+  onWeightChange() {
+    const rentVal = parseInt(document.getElementById('sliderWeightRent')?.value || '40', 10);
+    const spaceVal = parseInt(document.getElementById('sliderWeightSpace')?.value || '30', 10);
+    const transitVal = parseInt(document.getElementById('sliderWeightTransit')?.value || '20', 10);
+    const depositVal = parseInt(document.getElementById('sliderWeightDeposit')?.value || '10', 10);
+
+    const elRent = document.getElementById('valWeightRent');
+    const elSpace = document.getElementById('valWeightSpace');
+    const elTransit = document.getElementById('valWeightTransit');
+    const elDep = document.getElementById('valWeightDeposit');
+
+    if (elRent) elRent.innerText = `${rentVal}%`;
+    if (elSpace) elSpace.innerText = `${spaceVal}%`;
+    if (elTransit) elTransit.innerText = `${transitVal}%`;
+    if (elDep) elDep.innerText = `${depositVal}%`;
+
+    this.weights = { rent: rentVal, space: spaceVal, transit: transitVal, deposit: depositVal };
+    this.renderBestMatchView();
+  }
+
+  toggleCompareProperty(id) {
+    if (this.selectedForComparison.has(id)) {
+      this.selectedForComparison.delete(id);
+    } else {
+      if (this.selectedForComparison.size >= 4) {
+        alert('You can compare up to 4 properties side-by-side.');
+        return;
+      }
+      this.selectedForComparison.add(id);
+    }
+
+    const compareBtn = document.getElementById('compareSelectedBtn');
+    if (compareBtn) {
+      compareBtn.innerText = `Compare Selected (${this.selectedForComparison.size})`;
+      compareBtn.disabled = this.selectedForComparison.size < 2;
+    }
+    this.renderBestMatchView();
+  }
+
+  openComparisonModal() {
+    const modal = document.getElementById('comparisonModal');
+    const body = document.getElementById('comparisonModalBody');
+    if (!modal || !body) return;
+
+    const selectedProps = this.calculateMatchScores().filter(p => this.selectedForComparison.has(p.id));
+
+    if (selectedProps.length < 2) {
+      alert('Please select at least 2 properties to compare side-by-side.');
+      return;
+    }
+
+    body.innerHTML = `
+      <div class="comparison-table-wrap">
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Feature / Metric</th>
+              ${selectedProps.map(p => `<th>${p.title.slice(0, 28)}...</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Match Score</strong></td>
+              ${selectedProps.map(p => `<td><strong style="color:var(--primary); font-size:1rem;">${p.matchScore}% Match</strong></td>`).join('')}
+            </tr>
+            <tr>
+              <td><strong>Monthly Rent</strong></td>
+              ${selectedProps.map(p => `<td>₹${p.rent.toLocaleString()}/mo</td>`).join('')}
+            </tr>
+            <tr>
+              <td><strong>Security Deposit</strong></td>
+              ${selectedProps.map(p => `<td>₹${p.deposit.toLocaleString()} (${(p.deposit/p.rent).toFixed(1)}x)</td>`).join('')}
+            </tr>
+            <tr>
+              <td><strong>Carpet Area (Sqft)</strong></td>
+              ${selectedProps.map(p => `<td>${p.sqft} sqft (${(p.sqft/parseInt(p.bhk,10)).toFixed(0)} sqft/BHK)</td>`).join('')}
+            </tr>
+            <tr>
+              <td><strong>BHK Type</strong></td>
+              ${selectedProps.map(p => `<td>${p.bhk}</td>`).join('')}
+            </tr>
+            <tr>
+              <td><strong>Locality & Distance</strong></td>
+              ${selectedProps.map(p => `<td>${p.locality}<br/><span style="font-size:0.75rem; color:var(--text-muted);">${p.distKm} km to Station</span></td>`).join('')}
+            </tr>
+            <tr>
+              <td><strong>Furnishing</strong></td>
+              ${selectedProps.map(p => `<td>${p.furnishing}</td>`).join('')}
+            </tr>
+            <tr>
+              <td><strong>Source</strong></td>
+              ${selectedProps.map(p => `<td>${p.source}</td>`).join('')}
+            </tr>
+            <tr>
+              <td><strong>Actions</strong></td>
+              ${selectedProps.map(p => `
+                <td>
+                  <a href="${p.url}" target="_blank" class="btn btn-primary" style="font-size:0.75rem; padding:4px 8px; text-decoration:none;">Open Link ↗</a>
+                </td>
+              `).join('')}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    modal.classList.add('active');
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  closeComparisonModal() {
+    document.getElementById('comparisonModal')?.classList.remove('active');
   }
 }
 
