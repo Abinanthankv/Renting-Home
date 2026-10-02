@@ -8,28 +8,54 @@ class ListingScraper {
       (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
       (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
     ];
+  }
 
-    this.localityMap = [
-      { keys: ['ssm-nagar', 'ssm_nagar', 'ssm nagar'], name: 'SSM Nagar, Perungalathur', lat: 12.9025, lng: 80.0785 },
-      { keys: ['old-perungalathur', 'old perungalathur'], name: 'Old Perungalathur', lat: 12.9080, lng: 80.0810 },
-      { keys: ['new-perungalathur', 'new perungalathur', 'perungalathur'], name: 'New Perungalathur', lat: 12.9049, lng: 80.0846 },
-      { keys: ['east-tambaram', 'east tambaram'], name: 'East Tambaram', lat: 12.9249, lng: 80.1180 },
-      { keys: ['west-tambaram', 'west tambaram', 'tambaram'], name: 'Tambaram', lat: 12.9249, lng: 80.1000 },
-      { keys: ['selaiyur'], name: 'Selaiyur', lat: 12.9226, lng: 80.1294 },
-      { keys: ['chromepet', 'chrompet'], name: 'Chromepet', lat: 12.9522, lng: 80.1410 },
-      { keys: ['guduvancheri', 'guduvancherry'], name: 'Guduvancheri', lat: 12.8439, lng: 80.0597 },
-      { keys: ['vandalur'], name: 'Vandalur', lat: 12.8904, lng: 80.0815 },
-      { keys: ['velachery'], name: 'Velachery', lat: 12.9754, lng: 80.2206 },
-      { keys: ['medavakkam'], name: 'Medavakkam', lat: 12.9171, lng: 80.1923 },
-      { keys: ['sholinganallur'], name: 'Sholinganallur', lat: 12.9010, lng: 80.2279 },
-      { keys: ['thoraipakkam'], name: 'Thoraipakkam', lat: 12.9416, lng: 80.2362 },
-      { keys: ['perungudi'], name: 'Perungudi', lat: 12.9654, lng: 80.2461 },
-      { keys: ['guindy'], name: 'Guindy', lat: 13.0067, lng: 80.2020 },
-      { keys: ['pallavaram'], name: 'Pallavaram', lat: 12.9675, lng: 80.1491 },
-      { keys: ['chitlapakkam'], name: 'Chitlapakkam', lat: 12.9348, lng: 80.1388 },
-      { keys: ['camp-road', 'camp road'], name: 'Camp Road, Selaiyur', lat: 12.9192, lng: 80.1235 },
-      { keys: ['mudichur'], name: 'Mudichur', lat: 12.9064, lng: 80.0583 }
-    ];
+  getJitteredCoordinates(lat, lng, id) {
+    if (!id) return { lat, lng };
+    let hash = 0;
+    const str = String(id);
+    for (let i = 0; i < str.length; i++) {
+      hash = (hash << 5) - hash + str.charCodeAt(i);
+      hash |= 0;
+    }
+    const positiveHash = Math.abs(hash);
+    const latOffset = (((positiveHash % 100) / 100) - 0.5) * 0.0035;
+    const lngOffset = ((((Math.floor(positiveHash / 100)) % 100) / 100) - 0.5) * 0.0035;
+    return {
+      lat: parseFloat((lat + latOffset).toFixed(6)),
+      lng: parseFloat((lng + lngOffset).toFixed(6))
+    };
+  }
+
+  extractLatLonFromUrl(url) {
+    if (!url) return null;
+
+    // 1. Check for searchParam base64 parameter in NoBroker URL
+    const spMatch = url.match(/searchParam=([A-Za-z0-9%_-]+)/);
+    if (spMatch) {
+      try {
+        let b64Str = decodeURIComponent(spMatch[1]);
+        while (b64Str.length % 4 !== 0) b64Str += '=';
+        const decoded = typeof Buffer !== 'undefined' ? Buffer.from(b64Str, 'base64').toString('utf8') : atob(b64Str);
+        const data = JSON.parse(decoded);
+        if (Array.isArray(data) && data[0]) {
+          if (data[0].lat && (data[0].lon || data[0].lng)) {
+            return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon || data[0].lng) };
+          }
+        }
+      } catch(e) {}
+    }
+
+    // 2. Direct lat/lng in URL query or google map string
+    const latM = url.match(/[?&]lat=([0-9.-]+)/i) || url.match(/@([0-9.-]+),([0-9.-]+)/);
+    const lngM = url.match(/[?&](?:lng|lon)=([0-9.-]+)/i);
+    if (latM && lngM) {
+      return { lat: parseFloat(latM[1]), lng: parseFloat(lngM[1]) };
+    } else if (latM && latM[2]) {
+      return { lat: parseFloat(latM[1]), lng: parseFloat(latM[2]) };
+    }
+
+    return null;
   }
 
   isAntiBotHtml(html) {
@@ -90,7 +116,6 @@ class ListingScraper {
     if (isUrl) {
       rawHtml = await this.fetchUrlContent(url);
       if (!rawHtml || this.isAntiBotHtml(rawHtml)) {
-        // Smart URL slug parsing fallback
         console.log('CORS proxy blocked by target domain. Extracting property metadata directly from URL slug...');
         return this.parseFromUrlSlug(url);
       }
@@ -135,7 +160,6 @@ class ListingScraper {
       }
     }
 
-    // Realistic market base rent for South Chennai suburban area
     let baseRent = 14500;
     switch (bhkCount) {
       case 1: baseRent = 9500; break;
@@ -159,8 +183,6 @@ class ListingScraper {
     const is99acres = url.includes('99acres.com');
     const source = isNoBroker ? 'NoBroker' : (is99acres ? '99acres' : 'Web Link');
 
-    const lowerUrl = url.toLowerCase();
-
     // Check for exact NoBroker Property ID match (e.g. 8a9fb1827b49e8e6017b4a14933216b1)
     if (url.includes('8a9fb1827b49e8e6017b4a14933216b1')) {
       return [{
@@ -176,8 +198,8 @@ class ListingScraper {
         preferredTenant: 'Family',
         locality: 'Sadhanathapuram, New Perungalathur',
         address: 'Sadhanathapuram near City Union Bank Ltd., New Perungalathur, Chennai',
-        latitude: 12.9062,
-        longitude: 80.0825,
+        latitude: 12.905686,
+        longitude: 80.093487,
         description: '1 BHK Flat In Bethel Iellam For Rent In New Perungalathur. Sadhanathapuram near City Union Bank Ltd. 900 sqft, 1 balcony, bike parking, newly constructed.',
         photos: [
           'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?w=800&auto=format&fit=crop',
@@ -218,37 +240,32 @@ class ListingScraper {
     const bhk = bhkRaw || metrics.bhk;
     const sqft = sqftParsed || metrics.sqft;
 
-    // 6. Detect Locality & Geolocation
-    let locality = 'New Perungalathur';
-    let lat = 12.9049;
-    let lng = 80.0846;
+    // 6. Scrape Latitude & Longitude directly from URL searchParam or query
+    const scrapedCoords = this.extractLatLonFromUrl(url);
+    let rawLat = scrapedCoords ? scrapedCoords.lat : 12.9049;
+    let rawLng = scrapedCoords ? scrapedCoords.lng : 80.0846;
 
-    let matchedLocality = false;
-    for (const loc of this.localityMap) {
-      if (loc.keys.some(k => lowerUrl.includes(k))) {
-        locality = loc.name;
-        lat = loc.lat;
-        lng = loc.lng;
-        matchedLocality = true;
-        break;
-      }
+    // Apply unique micro-jitter so multiple listings never overlap directly on the map
+    const jittered = this.getJitteredCoordinates(rawLat, rawLng, url);
+    const lat = jittered.lat;
+    const lng = jittered.lng;
+
+    // 7. Scrape Locality Name from URL slug dynamically
+    let locality = 'Chennai';
+    const slugLocalityMatch = url.match(/in-([a-z0-9-]+)-(chennai|bangalore|mumbai|delhi|hyderabad)/i) ||
+                              url.match(/property\/(?:rent\/[^\/]+\/)?([a-z0-9-]+)/i);
+    if (slugLocalityMatch) {
+      locality = slugLocalityMatch[1]
+        .split('-')
+        .filter(w => w !== 'for' && w !== 'rent' && w !== 'in' && w !== 'apartment' && w !== 'flat' && w !== 'bhk')
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ');
     }
 
-    if (!matchedLocality) {
-      const slugLocalityMatch = url.match(/in-([a-z0-9-]+)-(chennai|bangalore|mumbai|delhi|hyderabad)/i);
-      if (slugLocalityMatch) {
-        locality = slugLocalityMatch[1]
-          .split('-')
-          .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-          .join(' ');
-      }
-    }
-
-    // 7. Format Clean Dynamic Title
+    // 8. Format Clean Dynamic Title
     const formattedType = propType.charAt(0).toUpperCase() + propType.slice(1);
     const title = `${bhk} ${formattedType} for Rent in ${locality}`;
 
-    // 8. Photo selection
     const photos = isNoBroker ? [
       'https://images.unsplash.com/photo-1560518883-ce09059eeffa?w=800&auto=format&fit=crop',
       'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=800&auto=format&fit=crop',
@@ -505,22 +522,29 @@ class ListingScraper {
     const tenantM = text.match(/(Family|Bachelor|Bachelors|Company|All)/i);
     const preferredTenant = tenantM ? tenantM[1] : 'Family';
 
-    let locality = 'New Perungalathur';
-    let lat = 12.9049;
-    let lng = 80.0846;
+    // 8. Dynamic Geolocation Extraction from text / HTML or URL
+    const latMatch = text.match(/latitude":?\s*([0-9.-]+)/i) || text.match(/lat":?\s*([0-9.-]+)/i);
+    const lngMatch = text.match(/longitude":?\s*([0-9.-]+)/i) || text.match(/lng":?\s*([0-9.-]+)/i) || text.match(/lon":?\s*([0-9.-]+)/i);
+    let rawLat = latMatch ? parseFloat(latMatch[1]) : 12.9049;
+    let rawLng = lngMatch ? parseFloat(lngMatch[1]) : 80.0846;
 
-    const lowerText = text.toLowerCase();
-    for (const loc of this.localityMap) {
-      if (loc.keys.some(k => lowerText.includes(k))) {
-        locality = loc.name;
-        lat = loc.lat;
-        lng = loc.lng;
-        break;
+    if (!latMatch && url) {
+      const urlCoords = this.extractLatLonFromUrl(url);
+      if (urlCoords) {
+        rawLat = urlCoords.lat;
+        rawLng = urlCoords.lng;
       }
     }
 
+    const propId = `prop_${Date.now()}`;
+    const jittered = this.getJitteredCoordinates(rawLat, rawLng, propId);
+
+    // Extract Locality dynamically
+    const locMatch = text.match(/in\s+([A-Z][a-zA-Z\s]+?)(?:,|\s+Chennai|\n)/i) || title.match(/in\s+([A-Z][a-zA-Z\s]+)/i);
+    const locality = locMatch ? locMatch[1].trim() : 'Chennai';
+
     return [{
-      id: `prop_${Date.now()}`,
+      id: propId,
       source: url && url.includes('nobroker') ? 'NoBroker' : (url && url.includes('99acres') ? '99acres' : 'Custom Import'),
       title,
       rent,
@@ -532,8 +556,8 @@ class ListingScraper {
       preferredTenant,
       locality,
       address,
-      latitude: lat,
-      longitude: lng,
+      latitude: jittered.lat,
+      longitude: jittered.lng,
       description: text.slice(0, 400) + '...',
       photos: ['https://images.unsplash.com/photo-1556911220-e15b29be8c8f?w=800&auto=format&fit=crop'],
       url: url || '#',

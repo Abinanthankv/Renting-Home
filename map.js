@@ -200,11 +200,27 @@ class MapController {
     if (!properties || properties.length === 0) return;
 
     const bounds = [];
+    const seenCoords = new Map();
 
     properties.forEach((prop) => {
       if (!prop.latitude || !prop.longitude) return;
 
-      const latLng = [prop.latitude, prop.longitude];
+      let key = `${prop.latitude.toFixed(5)},${prop.longitude.toFixed(5)}`;
+      let finalLat = prop.latitude;
+      let finalLng = prop.longitude;
+
+      if (seenCoords.has(key)) {
+        const count = seenCoords.get(key) + 1;
+        seenCoords.set(key, count);
+        const angle = count * 1.25;
+        const distance = 0.0008 * Math.sqrt(count);
+        finalLat = parseFloat((prop.latitude + (distance * Math.sin(angle))).toFixed(6));
+        finalLng = parseFloat((prop.longitude + (distance * Math.cos(angle))).toFixed(6));
+      } else {
+        seenCoords.set(key, 0);
+      }
+
+      const latLng = [finalLat, finalLng];
       bounds.push(latLng);
 
       const isNoBroker = prop.source === 'NoBroker';
