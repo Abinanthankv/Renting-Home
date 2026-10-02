@@ -24,15 +24,16 @@ class AppController {
     // 3. Initialize DB & Load Properties
     try {
       await window.propertyDB.init();
-      this.allProperties = await window.propertyDB.getAll();
-
-      // If empty DB, load initial demo properties
-      if (!this.allProperties || this.allProperties.length === 0) {
-        await this.loadInitialDemoProperties();
-        this.allProperties = await window.propertyDB.getAll();
+      
+      // Clean up legacy demo listing IDs if present
+      const demoIds = ['nb_8aa9b54ea06c38c201a06c44fbca0698', 'acres_T91369142', 'nb_8a9fbf8283548f36018354fb4c394cd7'];
+      for (const demoId of demoIds) {
+        await window.propertyDB.delete(demoId);
       }
+
+      this.allProperties = await window.propertyDB.getAll();
     } catch (e) {
-      console.warn('DB load error, fallback to demo properties:', e);
+      console.warn('DB load error:', e);
     }
 
     // 4. Render Sidebar Feed & Map Markers
@@ -62,81 +63,7 @@ class AppController {
     });
   }
 
-  async loadInitialDemoProperties() {
-    const demoItems = [
-      {
-        id: 'nb_8aa9b54ea06c38c201a06c44fbca0698',
-        source: 'NoBroker',
-        title: '1 BHK Independent House for Rent In Mugavari 2nd Street',
-        rent: 13500,
-        deposit: 100000,
-        maintenance: 1000,
-        sqft: 604,
-        bhk: '1 BHK',
-        furnishing: 'Unfurnished',
-        preferredTenant: 'Family',
-        locality: 'Tambaram',
-        address: 'Independent House, Mugavari 2nd street, Mugavari 2nd Street, Tambaram, Chennai',
-        latitude: 12.921038,
-        longitude: 80.101235,
-        description: 'Ready to move 1 BHK property is now available. One bike parking is allowed. Pets are not permitted. Maintenance charges subject to change. Looking for tenants who align with a quiet, family friendly environment.',
-        photos: [
-          'https://images.nobroker.in/images/8aa9b54ea06c38c201a06c44fbca0698/8aa9b54ea06c38c201a06c44fbca0698_59177_941964_large.jpg',
-          'https://images.nobroker.in/images/8aa9b54ea06c38c201a06c44fbca0698/8aa9b54ea06c38c201a06c44fbca0698_55686_307334_large.jpg'
-        ],
-        url: 'https://www.nobroker.in/property/1-bhk-apartment-for-rent-in-mugavari-2nd-street-chennai-for-rs-13500/8aa9b54ea06c38c201a06c44fbca0698/detail',
-        createdAt: Date.now() - 10000
-      },
-      {
-        id: 'acres_T91369142',
-        source: '99acres',
-        title: '4 BHK Independent House / Villa for Rent in Old Perungalathur',
-        rent: 50000,
-        deposit: 300000,
-        maintenance: 1500,
-        sqft: 1340,
-        bhk: '4 BHK',
-        furnishing: 'Semi-Furnished',
-        preferredTenant: 'Family / Professionals',
-        locality: 'Old Perungalathur',
-        address: 'Old Perungalathur, Chennai South, Tamil Nadu',
-        latitude: 12.91725,
-        longitude: 80.08913,
-        description: 'Step into a lifestyle of comfort with this elegantly designed 4 BHK semi-furnished residence in Old Perungalathur. Corner plot with excellent ventilation, 2 covered car parking spaces, vaastu compliant.',
-        photos: [
-          'https://imagecdn.99acres.com/media1/42388/11/847771685O-1790470546077.jpg'
-        ],
-        url: 'https://www.99acres.com/4-bhk-bedroom-independent-house-villa-for-rent-in-old-perungalathur-chennai-south-1340-sqft-r2-spid-T91369142',
-        createdAt: Date.now() - 5000
-      },
-      {
-        id: 'nb_8a9fbf8283548f36018354fb4c394cd7',
-        source: 'NoBroker',
-        title: '1 BHK Apartment In Sathya Flats for Rent In East Tambaram',
-        rent: 9000,
-        deposit: 27000,
-        maintenance: 600,
-        sqft: 570,
-        bhk: '1 BHK',
-        furnishing: 'Unfurnished',
-        preferredTenant: 'Family',
-        locality: 'East Tambaram',
-        address: 'Sathya Flats, Thiruppanar street, East Tambaram, Chennai',
-        latitude: 12.9249,
-        longitude: 80.1290,
-        description: 'Spacious 1 BHK flat in East Tambaram for rent. Close to railway station and markets.',
-        photos: [
-          'https://images.nobroker.in/images/8a9fbf8283548f36018354fb4c394cd7/8a9fbf8283548f36018354fb4c394cd7_603442_503362_large.jpg'
-        ],
-        url: 'https://www.nobroker.in/property/1-bhk-apartment-for-rent-in-11-72-east-tambaram-tambaram-tamil-nadu-600059-india-chennai-for-rs-9000/8a9fbf8283548f36018354fb4c394cd7/detail',
-        createdAt: Date.now()
-      }
-    ];
 
-    for (const item of demoItems) {
-      await window.propertyDB.save(item);
-    }
-  }
 
   setupEventListeners() {
     // Search input listener
