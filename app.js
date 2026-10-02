@@ -177,7 +177,9 @@ class AppController {
           </div>
           <div class="card-body">
             <h3 class="card-title">${prop.title}</h3>
-            <div class="card-address"><i data-lucide="map-pin"></i> ${prop.locality || prop.address}</div>
+            <div class="card-address" onclick="event.stopPropagation(); window.open('https://www.google.com/maps/search/?api=1&query=${prop.latitude},${prop.longitude}', '_blank')" title="Open location in Google Maps">
+              <i data-lucide="map-pin"></i> ${prop.locality || prop.address} <span class="gmaps-arrow">↗</span>
+            </div>
             <div class="card-specs">
               <span class="spec-item"><i data-lucide="home"></i> ${prop.bhk}</span>
               <span class="spec-item"><i data-lucide="maximize"></i> ${prop.sqft} sqft</span>
@@ -280,9 +282,9 @@ class AppController {
         </div>
       </div>
 
-      <div style="font-size:0.85rem; color: var(--text-muted); display:flex; align-items:flex-start; gap:6px;">
-        <i data-lucide="map-pin" style="color:var(--primary);flex-shrink:0;margin-top:2px;"></i>
-        <span>${prop.address}</span>
+      <div class="detail-location-clickable" onclick="window.open('https://www.google.com/maps/search/?api=1&query=${prop.latitude},${prop.longitude}', '_blank')" title="Open location in Google Maps">
+        <i data-lucide="map-pin" style="color:var(--primary);flex-shrink:0;"></i>
+        <span style="flex:1;">${prop.address} <span style="font-size:0.75rem; color:var(--primary); font-weight:600; font-family:monospace; margin-left:4px;">(📍 ${prop.latitude.toFixed(4)}, ${prop.longitude.toFixed(4)}) ↗</span></span>
       </div>
 
       <!-- Nearby Transport Radar Section -->

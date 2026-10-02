@@ -318,9 +318,36 @@ body {
 .card-address {
   font-size: 0.8rem;
   color: var(--text-muted);
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 4px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
+  margin-left: -4px;
+  transition: all 0.15s ease;
+}
+
+.card-address:hover {
+  color: var(--primary);
+  background-color: var(--primary-light);
+  text-decoration: underline;
+}
+
+.card-address i {
+  color: var(--primary);
+  transition: transform 0.15s ease;
+}
+
+.card-address:hover i {
+  transform: scale(1.15);
+}
+
+.gmaps-arrow {
+  font-size: 0.7rem;
+  opacity: 0.7;
+  color: var(--primary);
+  font-weight: 700;
 }
 
 .card-specs {
@@ -471,6 +498,36 @@ body {
   font-size: 11px;
   color: #64748b;
   margin: 4px 0 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  transition: color 0.15s ease;
+}
+
+.map-popup-address:hover {
+  color: #6366f1;
+  text-decoration: underline;
+}
+
+.detail-location-clickable {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  transition: all 0.15s ease;
+}
+
+.detail-location-clickable:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary);
 }
 
 .map-popup-btn {

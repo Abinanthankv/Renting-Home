@@ -232,7 +232,9 @@ class MapController {
             <span class="map-popup-badge" style="background: ${badgeColor}">${prop.source}</span>
             <h4 class="map-popup-title">${prop.title}</h4>
             <div class="map-popup-price">₹${prop.rent.toLocaleString()}/mo <span style="font-size:11px;color:#94a3b8;">(Dep: ₹${prop.deposit.toLocaleString()})</span></div>
-            <p class="map-popup-address"><i data-lucide="map-pin"></i> ${prop.locality || prop.address}</p>
+            <p class="map-popup-address" onclick="window.open('https://www.google.com/maps/search/?api=1&query=${prop.latitude},${prop.longitude}', '_blank')" title="Open location in Google Maps">
+              <i data-lucide="map-pin" style="color:#6366f1;"></i> ${prop.locality || prop.address} <span style="font-size:10px; color:#6366f1; font-weight:bold;">↗</span>
+            </p>
             <button class="map-popup-btn" onclick="window.app.selectProperty('${prop.id}')">View Details & Nearby</button>
           </div>
         </div>
