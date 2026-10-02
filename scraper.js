@@ -1,6 +1,6 @@
 /**
  * Scraper & Parser engine for NoBroker and 99acres listings
- * Pure extraction engine: Scrapes rent, deposit, lat, long, title, photos, and specs directly from site/payload/URL
+ * Fast, pure extraction engine: Scrapes rent, deposit, lat, long, title, photos, and specs directly from site/payload/URL.
  * Zero hardcoded fallback values, zero artificial calculations.
  */
 class ListingScraper {
@@ -10,6 +10,47 @@ class ListingScraper {
       (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
       (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
     ];
+  }
+
+  async fetchWithTimeout(proxyUrl, timeoutMs = 1200) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(proxyUrl, {
+        signal: controller.signal,
+        headers: { 
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+      clearTimeout(timeoutId);
+      return res;
+    } catch(e) {
+      clearTimeout(timeoutId);
+      return null;
+    }
+  }
+
+  async geocodeLocality(localityStr) {
+    if (!localityStr || localityStr === 'N/A' || localityStr === 'Chennai') return null;
+    const queries = [
+      `${localityStr}, Tamil Nadu`,
+      `${localityStr}, Chennai, Tamil Nadu`,
+      localityStr
+    ];
+    for (const q of queries) {
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}`;
+        const res = await this.fetchWithTimeout(url, 1500);
+        if (res && res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && data[0] && data[0].lat && data[0].lon) {
+            return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+          }
+        }
+      } catch(e) {}
+    }
+    return null;
   }
 
   extractLatLonFromUrl(url) {
@@ -79,10 +120,8 @@ class ListingScraper {
     for (const proxyFn of this.corsProxies) {
       try {
         const proxyUrl = proxyFn(targetUrl);
-        const res = await fetch(proxyUrl, {
-          headers: { 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' }
-        });
-        if (res.ok) {
+        const res = await this.fetchWithTimeout(proxyUrl, 1200);
+        if (res && res.ok) {
           const text = await res.text();
           if (text && text.length > 500 && !this.isAntiBotHtml(text)) {
             return text;
@@ -104,22 +143,22 @@ class ListingScraper {
       rawHtml = await this.fetchUrlContent(url);
       if (!rawHtml || this.isAntiBotHtml(rawHtml)) {
         console.log('Extracting property metadata directly from URL slug...');
-        return this.parseFromUrlSlug(url);
+        return await this.parseFromUrlSlug(url);
       }
     } else {
       rawHtml = urlOrPayload.trim();
     }
 
     if (url.includes('nobroker.in') || rawHtml.includes('nobroker.in') || rawHtml.includes('nb.appState')) {
-      return this.parseNoBroker(rawHtml, url);
+      return await this.parseNoBroker(rawHtml, url);
     } else if (url.includes('99acres.com') || rawHtml.includes('99acres.com') || rawHtml.includes('nnacres')) {
-      return this.parse99acres(rawHtml, url);
+      return await this.parse99acres(rawHtml, url);
     } else {
-      return this.parseGeneric(rawHtml, url);
+      return await this.parseGeneric(rawHtml, url);
     }
   }
 
-  parseFromUrlSlug(url) {
+  async parseFromUrlSlug(url) {
     const isNoBroker = url.includes('nobroker.in');
     const is99acres = url.includes('99acres.com');
     const source = isNoBroker ? 'NoBroker' : (is99acres ? '99acres' : 'Web Link');
@@ -149,12 +188,7 @@ class ListingScraper {
     const sqftMatch = url.match(/(\d+)-?sqft/i) || url.match(/(\d+)-?sq-?ft/i);
     const sqft = sqftMatch ? parseInt(sqftMatch[1], 10) : 0;
 
-    // 6. Scrape Latitude & Longitude directly from URL searchParam or query
-    const scrapedCoords = this.extractLatLonFromUrl(url);
-    const lat = scrapedCoords ? scrapedCoords.lat : 0;
-    const lng = scrapedCoords ? scrapedCoords.lng : 0;
-
-    // 7. Scrape Locality Name from URL slug dynamically
+    // 6. Scrape Locality Name from URL slug dynamically
     let locality = 'Chennai';
     const slugLocalityMatch = url.match(/in-([a-z0-9-]+)-(chennai|bangalore|mumbai|delhi|hyderabad)/i) ||
                               url.match(/property\/(?:rent\/[^\/]+\/)?([a-z0-9-]+)/i);
@@ -164,6 +198,19 @@ class ListingScraper {
         .filter(w => w !== 'for' && w !== 'rent' && w !== 'in' && w !== 'apartment' && w !== 'flat' && w !== 'bhk')
         .map(w => w.charAt(0).toUpperCase() + w.slice(1))
         .join(' ');
+    }
+
+    // 7. Scrape Latitude & Longitude directly from URL searchParam, query, or dynamic OSM geocoding
+    const scrapedCoords = this.extractLatLonFromUrl(url);
+    let lat = scrapedCoords ? scrapedCoords.lat : 0;
+    let lng = scrapedCoords ? scrapedCoords.lng : 0;
+
+    if (!scrapedCoords && locality && locality !== 'Chennai') {
+      const geo = await this.geocodeLocality(locality);
+      if (geo) {
+        lat = geo.lat;
+        lng = geo.lng;
+      }
     }
 
     const formattedType = propType.charAt(0).toUpperCase() + propType.slice(1);
@@ -199,9 +246,9 @@ class ListingScraper {
     }];
   }
 
-  parseNoBroker(html, url) {
+  async parseNoBroker(html, url) {
     if (this.isAntiBotHtml(html) && url && url.includes('nobroker.in')) {
-      return this.parseFromUrlSlug(url);
+      return await this.parseFromUrlSlug(url);
     }
 
     const listings = [];
@@ -231,7 +278,7 @@ class ListingScraper {
     }
 
     if (listings.length === 0 && url && url.includes('nobroker.in')) {
-      const slugItems = this.parseFromUrlSlug(url);
+      const slugItems = await this.parseFromUrlSlug(url);
       if (slugItems && slugItems.length > 0) {
         const item = slugItems[0];
         
@@ -257,7 +304,7 @@ class ListingScraper {
     }
 
     if (listings.length === 0) {
-      return this.parseGeneric(html, url);
+      return await this.parseGeneric(html, url);
     }
 
     return listings;
@@ -302,9 +349,9 @@ class ListingScraper {
     };
   }
 
-  parse99acres(html, url) {
+  async parse99acres(html, url) {
     if (this.isAntiBotHtml(html) && url && url.includes('99acres.com')) {
-      return this.parseFromUrlSlug(url);
+      return await this.parseFromUrlSlug(url);
     }
 
     const listings = [];
@@ -362,15 +409,15 @@ class ListingScraper {
       });
     } else {
       if (url && url.includes('99acres.com')) {
-        return this.parseFromUrlSlug(url);
+        return await this.parseFromUrlSlug(url);
       }
-      return this.parseGeneric(html, url);
+      return await this.parseGeneric(html, url);
     }
 
     return listings;
   }
 
-  parseGeneric(textOrHtml, url) {
+  async parseGeneric(textOrHtml, url) {
     const text = textOrHtml.replace(/<[^>]*>/g, ' ');
 
     // 1. Scrape Title
@@ -415,7 +462,7 @@ class ListingScraper {
     const tenantM = text.match(/(Family|Bachelor|Bachelors|Company|All)/i);
     const preferredTenant = tenantM ? tenantM[1] : 'All';
 
-    // 8. Scrape Lat & Lng directly from text / HTML
+    // 8. Scrape Lat & Lng
     const latMatch = text.match(/latitude["']?:?\s*([0-9.-]+)/i) || text.match(/lat["']?:?\s*([0-9.-]+)/i);
     const lngMatch = text.match(/longitude["']?:?\s*([0-9.-]+)/i) || text.match(/lng["']?:?\s*([0-9.-]+)/i) || text.match(/lon["']?:?\s*([0-9.-]+)/i);
     let lat = latMatch ? parseFloat(latMatch[1]) : 0;
@@ -431,6 +478,14 @@ class ListingScraper {
 
     const locMatch = text.match(/in\s+([A-Z][a-zA-Z\s]+?)(?:,|\s+Chennai|\n)/i) || title.match(/in\s+([A-Z][a-zA-Z\s]+)/i);
     const locality = locMatch ? locMatch[1].trim() : 'Chennai';
+
+    if (!lat && locality && locality !== 'Chennai') {
+      const geo = await this.geocodeLocality(locality);
+      if (geo) {
+        lat = geo.lat;
+        lng = geo.lng;
+      }
+    }
 
     return [{
       id: `prop_${Date.now()}`,
