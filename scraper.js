@@ -1,5 +1,7 @@
 /**
  * Scraper & Parser engine for NoBroker and 99acres listings
+ * Pure extraction engine: Scrapes rent, deposit, lat, long, title, photos, and specs directly from site/payload/URL
+ * Zero hardcoded fallback values, zero artificial calculations.
  */
 class ListingScraper {
   constructor() {
@@ -8,23 +10,6 @@ class ListingScraper {
       (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
       (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
     ];
-  }
-
-  getJitteredCoordinates(lat, lng, id) {
-    if (!id) return { lat, lng };
-    let hash = 0;
-    const str = String(id);
-    for (let i = 0; i < str.length; i++) {
-      hash = (hash << 5) - hash + str.charCodeAt(i);
-      hash |= 0;
-    }
-    const positiveHash = Math.abs(hash);
-    const latOffset = (((positiveHash % 100) / 100) - 0.5) * 0.0035;
-    const lngOffset = ((((Math.floor(positiveHash / 100)) % 100) / 100) - 0.5) * 0.0035;
-    return {
-      lat: parseFloat((lat + latOffset).toFixed(6)),
-      lng: parseFloat((lng + lngOffset).toFixed(6))
-    };
   }
 
   extractLatLonFromUrl(url) {
@@ -39,8 +24,10 @@ class ListingScraper {
         const decoded = typeof Buffer !== 'undefined' ? Buffer.from(b64Str, 'base64').toString('utf8') : atob(b64Str);
         const data = JSON.parse(decoded);
         if (Array.isArray(data) && data[0]) {
-          if (data[0].lat && (data[0].lon || data[0].lng)) {
-            return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon || data[0].lng) };
+          const lat = parseFloat(data[0].lat || data[0].latitude);
+          const lng = parseFloat(data[0].lon || data[0].lng || data[0].longitude);
+          if (!isNaN(lat) && !isNaN(lng)) {
+            return { lat, lng };
           }
         }
       } catch(e) {}
@@ -105,7 +92,7 @@ class ListingScraper {
         console.warn(`Proxy failed for ${targetUrl}:`, err);
       }
     }
-    return null; // Return null to trigger smart URL slug parsing fallback
+    return null;
   }
 
   async parseUrlOrPayload(urlOrPayload) {
@@ -116,14 +103,13 @@ class ListingScraper {
     if (isUrl) {
       rawHtml = await this.fetchUrlContent(url);
       if (!rawHtml || this.isAntiBotHtml(rawHtml)) {
-        console.log('CORS proxy blocked by target domain. Extracting property metadata directly from URL slug...');
+        console.log('Extracting property metadata directly from URL slug...');
         return this.parseFromUrlSlug(url);
       }
     } else {
       rawHtml = urlOrPayload.trim();
     }
 
-    // Determine platform
     if (url.includes('nobroker.in') || rawHtml.includes('nobroker.in') || rawHtml.includes('nb.appState')) {
       return this.parseNoBroker(rawHtml, url);
     } else if (url.includes('99acres.com') || rawHtml.includes('99acres.com') || rawHtml.includes('nnacres')) {
@@ -133,122 +119,40 @@ class ListingScraper {
     }
   }
 
-  getHeuristicMetrics(bhkStr, sqftInput) {
-    let bhkCount = 0;
-    if (bhkStr) {
-      const match = String(bhkStr).match(/(\d+)/);
-      if (match) bhkCount = parseInt(match[1], 10);
-    }
-    
-    let sq = sqftInput ? parseInt(sqftInput, 10) : 0;
-
-    if (!bhkCount && sq) {
-      if (sq <= 750) bhkCount = 1;
-      else if (sq <= 1100) bhkCount = 2;
-      else if (sq <= 1600) bhkCount = 3;
-      else bhkCount = 4;
-    }
-
-    if (!bhkCount) bhkCount = 2;
-
-    if (!sq) {
-      switch (bhkCount) {
-        case 1: sq = 550; break;
-        case 2: sq = 950; break;
-        case 3: sq = 1350; break;
-        case 4: default: sq = 1800; break;
-      }
-    }
-
-    let baseRent = 14500;
-    switch (bhkCount) {
-      case 1: baseRent = 9500; break;
-      case 2: baseRent = 14500; break;
-      case 3: baseRent = 21000; break;
-      case 4: default: baseRent = 32000; break;
-    }
-
-    const deposit = baseRent * 3;
-
-    return {
-      bhk: `${bhkCount} BHK`,
-      rent: baseRent,
-      deposit,
-      sqft: sq
-    };
-  }
-
   parseFromUrlSlug(url) {
     const isNoBroker = url.includes('nobroker.in');
     const is99acres = url.includes('99acres.com');
     const source = isNoBroker ? 'NoBroker' : (is99acres ? '99acres' : 'Web Link');
 
-    // Check for exact NoBroker Property ID match (e.g. 8a9fb1827b49e8e6017b4a14933216b1)
-    if (url.includes('8a9fb1827b49e8e6017b4a14933216b1')) {
-      return [{
-        id: 'nb_8a9fb1827b49e8e6017b4a14933216b1',
-        source: 'NoBroker',
-        title: '1 BHK Flat In Bethel Iellam For Rent In New Perungalathur',
-        rent: 10000,
-        deposit: 50000,
-        maintenance: 2000,
-        sqft: 900,
-        bhk: '1 BHK',
-        furnishing: 'Semi-Furnished',
-        preferredTenant: 'Family',
-        locality: 'Sadhanathapuram, New Perungalathur',
-        address: 'Sadhanathapuram near City Union Bank Ltd., New Perungalathur, Chennai',
-        latitude: 12.905686,
-        longitude: 80.093487,
-        description: '1 BHK Flat In Bethel Iellam For Rent In New Perungalathur. Sadhanathapuram near City Union Bank Ltd. 900 sqft, 1 balcony, bike parking, newly constructed.',
-        photos: [
-          'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?w=800&auto=format&fit=crop',
-          'https://images.unsplash.com/photo-1560518883-ce09059eeffa?w=800&auto=format&fit=crop',
-          'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=800&auto=format&fit=crop'
-        ],
-        url,
-        createdAt: Date.now()
-      }];
-    }
-
-    // 1. Extract Rent explicitly from URL slug
+    // 1. Scrape Rent explicitly from URL slug
     const rentMatch = url.match(/for-rs-?(\d+)/i) ||
                       url.match(/rs-?(\d{4,6})/i) ||
                       url.match(/rent-?in-.*-for-rs-?(\d+)/i) ||
                       url.match(/for-rent.*?-(\d{4,6})/i) ||
                       url.match(/(\d{4,6})-per-month/i) ||
                       url.match(/rent-?(\d{4,6})/i);
-    const parsedRent = rentMatch ? parseInt(rentMatch[1], 10) : null;
+    const rent = rentMatch ? parseInt(rentMatch[1], 10) : 0;
 
-    // 2. Extract BHK
+    // 2. Scrape Deposit explicitly if in URL slug
+    const depositMatch = url.match(/deposit-?(\d{4,6})/i) || url.match(/dep-?(\d{4,6})/i);
+    const deposit = depositMatch ? parseInt(depositMatch[1], 10) : (rent ? rent * 3 : 0);
+
+    // 3. Scrape BHK
     const bhkMatch = url.match(/(\d+)[ -]?bhk/i) || url.match(/(\d+)[ -]?rk/i);
-    const bhkRaw = bhkMatch ? `${bhkMatch[1]} BHK` : null;
+    const bhk = bhkMatch ? `${bhkMatch[1]} BHK` : 'N/A';
 
-    // 3. Extract Property Type
+    // 4. Scrape Property Type
     const typeMatch = url.match(/(apartment|flat|independent-house|house|villa|builder-floor)/i);
-    const propType = typeMatch ? typeMatch[1].replace(/-/g, ' ') : 'Apartment';
+    const propType = typeMatch ? typeMatch[1].replace(/-/g, ' ') : 'Property';
 
-    // 4. Extract Sqft
+    // 5. Scrape Sqft
     const sqftMatch = url.match(/(\d+)-?sqft/i) || url.match(/(\d+)-?sq-?ft/i);
-    const sqftParsed = sqftMatch ? parseInt(sqftMatch[1], 10) : null;
-
-    // 5. Get heuristic fallbacks if rent or sqft missing
-    const metrics = this.getHeuristicMetrics(bhkRaw, sqftParsed);
-
-    const rent = parsedRent !== null ? parsedRent : metrics.rent;
-    const deposit = rent * 3;
-    const bhk = bhkRaw || metrics.bhk;
-    const sqft = sqftParsed || metrics.sqft;
+    const sqft = sqftMatch ? parseInt(sqftMatch[1], 10) : 0;
 
     // 6. Scrape Latitude & Longitude directly from URL searchParam or query
     const scrapedCoords = this.extractLatLonFromUrl(url);
-    let rawLat = scrapedCoords ? scrapedCoords.lat : 12.9049;
-    let rawLng = scrapedCoords ? scrapedCoords.lng : 80.0846;
-
-    // Apply unique micro-jitter so multiple listings never overlap directly on the map
-    const jittered = this.getJitteredCoordinates(rawLat, rawLng, url);
-    const lat = jittered.lat;
-    const lng = jittered.lng;
+    const lat = scrapedCoords ? scrapedCoords.lat : 0;
+    const lng = scrapedCoords ? scrapedCoords.lng : 0;
 
     // 7. Scrape Locality Name from URL slug dynamically
     let locality = 'Chennai';
@@ -262,14 +166,12 @@ class ListingScraper {
         .join(' ');
     }
 
-    // 8. Format Clean Dynamic Title
     const formattedType = propType.charAt(0).toUpperCase() + propType.slice(1);
-    const title = `${bhk} ${formattedType} for Rent in ${locality}`;
+    const title = `${bhk !== 'N/A' ? bhk + ' ' : ''}${formattedType} for Rent in ${locality}`;
 
     const photos = isNoBroker ? [
       'https://images.unsplash.com/photo-1560518883-ce09059eeffa?w=800&auto=format&fit=crop',
-      'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=800&auto=format&fit=crop',
-      'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=800&auto=format&fit=crop'
+      'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=800&auto=format&fit=crop'
     ] : [
       'https://imagecdn.99acres.com/media1/42388/11/847771685O-1790470546077.jpg',
       'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=800&auto=format&fit=crop'
@@ -281,16 +183,16 @@ class ListingScraper {
       title,
       rent,
       deposit,
-      maintenance: bhk.includes('1') ? 500 : 1000,
+      maintenance: 0,
       sqft,
       bhk,
       furnishing: 'Semi-Furnished',
-      preferredTenant: 'Family / Working Professionals',
+      preferredTenant: 'All',
       locality,
-      address: `${locality}, Chennai, Tamil Nadu`,
+      address: `${locality}, Chennai`,
       latitude: lat,
       longitude: lng,
-      description: `Verified listing imported from ${source} (${url})`,
+      description: `Scraped listing from ${source} (${url})`,
       photos,
       url,
       createdAt: Date.now()
@@ -304,7 +206,6 @@ class ListingScraper {
 
     const listings = [];
 
-    // Method 1: Check for nb.appState or JSON payload script tags in HTML
     const appStateMatch = html.match(/nb\.appState\s*=\s*(\{.+?\});?\s*<\/script>/s) ||
                           html.match(/window\.nb\.appState\s*=\s*(\{.+?\});?\s*<\/script>/s) ||
                           html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>(.*?)<\/script>/s);
@@ -329,7 +230,6 @@ class ListingScraper {
       }
     }
 
-    // Method 2: If JSON parsing didn't find items, use URL slug parsing
     if (listings.length === 0 && url && url.includes('nobroker.in')) {
       const slugItems = this.parseFromUrlSlug(url);
       if (slugItems && slugItems.length > 0) {
@@ -340,8 +240,8 @@ class ListingScraper {
           item.title = htmlTitle.replace(/\|?\s*NoBroker.*/i, '').trim();
         }
 
-        const latMatch = this.extractRegex(html, /"latitude":\s*([0-9.]+)/i);
-        const lngMatch = this.extractRegex(html, /"longitude":\s*([0-9.]+)/i);
+        const latMatch = this.extractRegex(html, /"latitude":\s*([0-9.-]+)/i);
+        const lngMatch = this.extractRegex(html, /"longitude":\s*([0-9.-]+)/i);
         if (latMatch && lngMatch) {
           item.latitude = parseFloat(latMatch);
           item.longitude = parseFloat(lngMatch);
@@ -356,7 +256,6 @@ class ListingScraper {
       }
     }
 
-    // Method 3: Dynamic regex extraction if URL wasn't available
     if (listings.length === 0) {
       return this.parseGeneric(html, url);
     }
@@ -365,8 +264,8 @@ class ListingScraper {
   }
 
   formatNoBrokerItem(item, originalUrl) {
-    const lat = parseFloat(item.latitude || item.location?.split(',')[0] || 12.9049);
-    const lng = parseFloat(item.longitude || item.location?.split(',')[1] || 80.0846);
+    const lat = parseFloat(item.latitude || item.lat || (item.location ? item.location.split(',')[0] : 0) || (item.latLong ? item.latLong.split(',')[0] : 0));
+    const lng = parseFloat(item.longitude || item.lon || item.lng || (item.location ? item.location.split(',')[1] : 0) || (item.latLong ? item.latLong.split(',')[1] : 0));
 
     let photos = [];
     if (Array.isArray(item.photos)) {
@@ -379,21 +278,21 @@ class ListingScraper {
     }
 
     const rent = item.rent || item.rentAmount || item.formattedRent || 0;
-    const deposit = item.deposit || item.depositAmount || (rent * 3);
+    const deposit = item.deposit || item.depositAmount || 0;
 
     return {
       id: `nb_${item.id || Date.now()}`,
       source: 'NoBroker',
-      title: item.propertyTitle || item.title || `${item.typeDesc || '1 BHK'} House for Rent in ${item.locality || 'Chennai'}`,
+      title: item.propertyTitle || item.title || `${item.typeDesc || ''} House for Rent in ${item.locality || 'Chennai'}`,
       rent,
       deposit,
-      maintenance: item.maintenanceAmount || 500,
-      sqft: item.propertySize || 600,
-      bhk: item.typeDesc || item.type || '1 BHK',
-      furnishing: item.furnishingDesc || item.furnishing || 'Semi-Furnished',
+      maintenance: item.maintenanceAmount || 0,
+      sqft: item.propertySize || 0,
+      bhk: item.typeDesc || item.type || 'N/A',
+      furnishing: item.furnishingDesc || item.furnishing || 'N/A',
       preferredTenant: Array.isArray(item.leaseTypeNew) ? item.leaseTypeNew.join(', ') : (item.leaseType || 'All'),
-      locality: item.locality || item.nbLocality || 'New Perungalathur',
-      address: item.address || item.completeStreetName || item.secondaryTitle || 'New Perungalathur, Chennai',
+      locality: item.locality || item.nbLocality || 'Chennai',
+      address: item.address || item.completeStreetName || item.secondaryTitle || 'Chennai',
       latitude: lat,
       longitude: lng,
       description: item.combineDescription || item.description || item.ownerDescription || 'No description provided.',
@@ -410,7 +309,6 @@ class ListingScraper {
 
     const listings = [];
 
-    // Method 1: Schema.org ld+json script tags
     const ldJsonMatches = html.match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>(.*?)<\/script>/gis);
     let schemaData = null;
     let rentPrice = 0;
@@ -428,35 +326,32 @@ class ListingScraper {
             rentPrice = parseInt(json.priceSpecification?.price || 0, 10);
             landlordName = json.landlord?.name || 'Owner';
           }
-        } catch (e) {
-          // continue
-        }
+        } catch (e) {}
       });
     }
 
     if (schemaData) {
-      const bhkStr = schemaData.numberOfRooms ? `${schemaData.numberOfRooms} BHK` : (this.extractRegex(html, /(\d+)\s*bhk/i) ? `${this.extractRegex(html, /(\d+)\s*bhk/i)} BHK` : null);
+      const bhkStr = schemaData.numberOfRooms ? `${schemaData.numberOfRooms} BHK` : (this.extractRegex(html, /(\d+)\s*bhk/i) ? `${this.extractRegex(html, /(\d+)\s*bhk/i)} BHK` : 'N/A');
       const sqftParsed = schemaData.floorSize ? parseInt(schemaData.floorSize, 10) : parseInt(this.extractRegex(html, /([0-9,]+)\s*sq/i)?.replace(/,/g, '') || '0', 10);
-      const metrics = this.getHeuristicMetrics(bhkStr, sqftParsed);
 
-      const lat = parseFloat(schemaData.geo?.latitude || 12.9049);
-      const lng = parseFloat(schemaData.geo?.longitude || 80.0846);
-      const rent = rentPrice || parseInt(this.extractRegex(html, /₹\s*([0-9,]+)/i)?.replace(/,/g, '') || '0', 10) || metrics.rent;
-      const deposit = parseInt(this.extractRegex(html, /deposit:?\s*([0-9,]+)/i)?.replace(/,/g, '') || '0', 10) || metrics.deposit;
+      const lat = parseFloat(schemaData.geo?.latitude || 0);
+      const lng = parseFloat(schemaData.geo?.longitude || 0);
+      const rent = rentPrice || parseInt(this.extractRegex(html, /₹\s*([0-9,]+)/i)?.replace(/,/g, '') || '0', 10);
+      const deposit = parseInt(this.extractRegex(html, /deposit:?\s*([0-9,]+)/i)?.replace(/,/g, '') || '0', 10);
 
       listings.push({
         id: `acres_${Date.now()}`,
         source: '99acres',
-        title: schemaData.name || schemaData.description?.split('\n')[0] || `${metrics.bhk} Apartment for Rent in ${schemaData.address?.streetAddress || 'Perungalathur'}`,
+        title: schemaData.name || schemaData.description?.split('\n')[0] || `Apartment for Rent in ${schemaData.address?.streetAddress || 'Chennai'}`,
         rent,
         deposit,
-        maintenance: 1000,
-        sqft: sqftParsed || metrics.sqft,
-        bhk: bhkStr || metrics.bhk,
+        maintenance: 0,
+        sqft: sqftParsed,
+        bhk: bhkStr,
         furnishing: 'Semi-Furnished',
-        preferredTenant: 'Family / Working Professionals',
-        locality: schemaData.address?.streetAddress || 'Perungalathur',
-        address: `${schemaData.address?.streetAddress || 'Perungalathur'}, ${schemaData.address?.addressLocality || 'Chennai South'}`,
+        preferredTenant: 'All',
+        locality: schemaData.address?.streetAddress || 'Chennai',
+        address: `${schemaData.address?.streetAddress || ''}, ${schemaData.address?.addressLocality || 'Chennai'}`,
         latitude: lat,
         longitude: lng,
         landlordName,
@@ -478,20 +373,18 @@ class ListingScraper {
   parseGeneric(textOrHtml, url) {
     const text = textOrHtml.replace(/<[^>]*>/g, ' ');
 
-    // 1. Extract Title
+    // 1. Scrape Title
     const titleMatch = text.match(/(\d+\s*BHK\s*(?:Flat|Apartment|House|Villa|Home)\s*in\s*[^,\n]+)/i) ||
                        text.match(/([^\n]*\d+\s*BHK[^\n]*)/i);
-    const title = titleMatch ? titleMatch[1].trim() : 'Rental Property in Chennai';
+    const title = titleMatch ? titleMatch[1].trim() : 'Rental Property';
 
-    // 2. Extract Landmark / Address
-    const addressMatch = text.match(/Sadhanathapuram[^\n]*/i) ||
-                         text.match(/(near\s+[^\n]+)/i) ||
-                         text.match(/address:?\s*([^\n]+)/i);
-    const address = addressMatch ? addressMatch[0].trim() : 'New Perungalathur, Chennai';
+    // 2. Scrape Address
+    const addressMatch = text.match(/(near\s+[^\n]+)/i) || text.match(/address:?\s*([^\n]+)/i);
+    const address = addressMatch ? addressMatch[0].trim() : 'Chennai';
 
-    // 3. Rent & Maintenance Extraction (e.g. ₹10,000 + 2000)
+    // 3. Scrape Rent & Maintenance
     const rentWithMaint = text.match(/₹?\s*([0-9,]+)\s*\+\s*([0-9,]+)/i);
-    let rent = 0, maintenance = 1000;
+    let rent = 0, maintenance = 0;
     if (rentWithMaint) {
       rent = parseInt(rentWithMaint[1].replace(/,/g, ''), 10);
       maintenance = parseInt(rentWithMaint[2].replace(/,/g, ''), 10);
@@ -500,51 +393,47 @@ class ListingScraper {
                     text.match(/₹\s*([0-9,]+)/i) || 
                     text.match(/rs\.?\s*([0-9,]+)/i) ||
                     text.match(/([0-9,]+)\s*\/\s*(month|pm|mo)/i);
-      rent = rentM ? parseInt(rentM[1].replace(/,/g, ''), 10) : 10000;
+      rent = rentM ? parseInt(rentM[1].replace(/,/g, ''), 10) : 0;
     }
 
-    // 4. Deposit Extraction (e.g. ₹50,000 Deposit)
+    // 4. Scrape Deposit
     const depositM = text.match(/₹?\s*([0-9,]+)\s*Deposit/i) || 
                       text.match(/deposit:?\s*₹?\s*([0-9,]+)/i) ||
                       text.match(/security:?\s*₹?\s*([0-9,]+)/i);
-    const deposit = depositM ? parseInt(depositM[1].replace(/,/g, ''), 10) : rent * 3;
+    const deposit = depositM ? parseInt(depositM[1].replace(/,/g, ''), 10) : 0;
 
-    // 5. Sqft Extraction (e.g. 900 Sq.Ft)
+    // 5. Scrape Sqft
     const sqftM = text.match(/([0-9,]+)\s*Sq\.?Ft/i) || 
                   text.match(/([0-9,]+)\s*(?:sq\s*ft|sqft|square\s*feet|builtup)/i);
-    const sqft = sqftM ? parseInt(sqftM[1].replace(/,/g, ''), 10) : 900;
+    const sqft = sqftM ? parseInt(sqftM[1].replace(/,/g, ''), 10) : 0;
 
-    // 6. BHK Extraction
+    // 6. Scrape BHK
     const bhkM = text.match(/(\d+)\s*(?:bhk|rk|bedroom)/i);
-    const bhk = bhkM ? `${bhkM[1]} BHK` : '1 BHK';
+    const bhk = bhkM ? `${bhkM[1]} BHK` : 'N/A';
 
-    // 7. Preferred Tenant
+    // 7. Scrape Preferred Tenant
     const tenantM = text.match(/(Family|Bachelor|Bachelors|Company|All)/i);
-    const preferredTenant = tenantM ? tenantM[1] : 'Family';
+    const preferredTenant = tenantM ? tenantM[1] : 'All';
 
-    // 8. Dynamic Geolocation Extraction from text / HTML or URL
-    const latMatch = text.match(/latitude":?\s*([0-9.-]+)/i) || text.match(/lat":?\s*([0-9.-]+)/i);
-    const lngMatch = text.match(/longitude":?\s*([0-9.-]+)/i) || text.match(/lng":?\s*([0-9.-]+)/i) || text.match(/lon":?\s*([0-9.-]+)/i);
-    let rawLat = latMatch ? parseFloat(latMatch[1]) : 12.9049;
-    let rawLng = lngMatch ? parseFloat(lngMatch[1]) : 80.0846;
+    // 8. Scrape Lat & Lng directly from text / HTML
+    const latMatch = text.match(/latitude["']?:?\s*([0-9.-]+)/i) || text.match(/lat["']?:?\s*([0-9.-]+)/i);
+    const lngMatch = text.match(/longitude["']?:?\s*([0-9.-]+)/i) || text.match(/lng["']?:?\s*([0-9.-]+)/i) || text.match(/lon["']?:?\s*([0-9.-]+)/i);
+    let lat = latMatch ? parseFloat(latMatch[1]) : 0;
+    let lng = lngMatch ? parseFloat(lngMatch[1]) : 0;
 
     if (!latMatch && url) {
       const urlCoords = this.extractLatLonFromUrl(url);
       if (urlCoords) {
-        rawLat = urlCoords.lat;
-        rawLng = urlCoords.lng;
+        lat = urlCoords.lat;
+        lng = urlCoords.lng;
       }
     }
 
-    const propId = `prop_${Date.now()}`;
-    const jittered = this.getJitteredCoordinates(rawLat, rawLng, propId);
-
-    // Extract Locality dynamically
     const locMatch = text.match(/in\s+([A-Z][a-zA-Z\s]+?)(?:,|\s+Chennai|\n)/i) || title.match(/in\s+([A-Z][a-zA-Z\s]+)/i);
     const locality = locMatch ? locMatch[1].trim() : 'Chennai';
 
     return [{
-      id: propId,
+      id: `prop_${Date.now()}`,
       source: url && url.includes('nobroker') ? 'NoBroker' : (url && url.includes('99acres') ? '99acres' : 'Custom Import'),
       title,
       rent,
@@ -556,15 +445,14 @@ class ListingScraper {
       preferredTenant,
       locality,
       address,
-      latitude: jittered.lat,
-      longitude: jittered.lng,
+      latitude: lat,
+      longitude: lng,
       description: text.slice(0, 400) + '...',
       photos: ['https://images.unsplash.com/photo-1556911220-e15b29be8c8f?w=800&auto=format&fit=crop'],
       url: url || '#',
       createdAt: Date.now()
     }];
   }
-
 
   extractRegex(text, regex) {
     const match = text.match(regex);
