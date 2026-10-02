@@ -193,13 +193,15 @@ class ListingScraper {
   parseNoBroker(html, url) {
     const listings = [];
 
-    // Method 1: Check for nb.appState in script tag
+    // Method 1: Check for nb.appState or JSON payload script tags in HTML
     const appStateMatch = html.match(/nb\.appState\s*=\s*(\{.+?\});?\s*<\/script>/s) ||
-                          html.match(/window\.nb\.appState\s*=\s*(\{.+?\});?\s*<\/script>/s);
+                          html.match(/window\.nb\.appState\s*=\s*(\{.+?\});?\s*<\/script>/s) ||
+                          html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>(.*?)<\/script>/s);
 
     if (appStateMatch) {
       try {
-        const state = JSON.parse(appStateMatch[1]);
+        const jsonText = appStateMatch[1] || appStateMatch[0];
+        const state = JSON.parse(jsonText);
         
         // Single detail page
         if (state.propertyDetails && state.propertyDetails.detailsData) {
@@ -214,32 +216,65 @@ class ListingScraper {
           });
         }
       } catch (e) {
-        console.warn('Failed parsing nb.appState JSON:', e);
+        console.warn('Failed parsing NoBroker JSON script tag:', e);
       }
     }
 
-    // Method 2: Regex extraction from raw HTML if JSON parsing didn't find items
+    // Method 2: If JSON parsing didn't find items, use URL slug parsing as primary source if URL is present
+    if (listings.length === 0 && url && url.includes('nobroker.in')) {
+      const slugItems = this.parseFromUrlSlug(url);
+      if (slugItems && slugItems.length > 0) {
+        const item = slugItems[0];
+        
+        // Enrich slug item with any additional info extracted from HTML regex
+        const htmlTitle = this.extractRegex(html, /<title[^>]*>(.*?)<\/title>/i);
+        if (htmlTitle && !htmlTitle.includes('404') && !htmlTitle.includes('Access Denied')) {
+          item.title = htmlTitle.replace(/\|?\s*NoBroker.*/i, '').trim();
+        }
+
+        const latMatch = this.extractRegex(html, /"latitude":\s*([0-9.]+)/i);
+        const lngMatch = this.extractRegex(html, /"longitude":\s*([0-9.]+)/i);
+        if (latMatch && lngMatch) {
+          item.latitude = parseFloat(latMatch);
+          item.longitude = parseFloat(lngMatch);
+        }
+
+        const photoMatches = html.match(/https:\/\/images\.nobroker\.in\/images\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9._-]+\.jpg/g);
+        if (photoMatches && photoMatches.length > 0) {
+          item.photos = Array.from(new Set(photoMatches)).slice(0, 8);
+        }
+
+        listings.push(item);
+      }
+    }
+
+    // Method 3: Dynamic regex extraction if URL wasn't available
     if (listings.length === 0) {
-      const title = this.extractRegex(html, /<title[^>]*>(.*?)<\/title>/i) || '1 BHK Flat for Rent in Chennai';
-      const rent = parseInt(this.extractRegex(html, /₹\s*([0-9,]+)/i)?.replace(/,/g, '') || '12000', 10);
-      const deposit = parseInt(this.extractRegex(html, /Deposit[^0-9]*([0-9,]+)/i)?.replace(/,/g, '') || '50000', 10);
-      const sqft = parseInt(this.extractRegex(html, /([0-9,]+)\s*sq\.?\s*ft/i)?.replace(/,/g, '') || '600', 10);
+      const bhkMatch = html.match(/(\d+)\s*bhk/i);
+      const bhkStr = bhkMatch ? `${bhkMatch[1]} BHK` : null;
+      const sqftParsed = parseInt(this.extractRegex(html, /([0-9,]+)\s*sq/i)?.replace(/,/g, '') || '0', 10);
+      const metrics = this.getHeuristicMetrics(bhkStr, sqftParsed);
+
+      const title = this.extractRegex(html, /<title[^>]*>(.*?)<\/title>/i) || `${metrics.bhk} Flat for Rent`;
+      const rent = parseInt(this.extractRegex(html, /₹\s*([0-9,]+)/i)?.replace(/,/g, '') || '0', 10) || metrics.rent;
+      const deposit = parseInt(this.extractRegex(html, /Deposit[^0-9]*([0-9,]+)/i)?.replace(/,/g, '') || '0', 10) || metrics.deposit;
+
       const lat = parseFloat(this.extractRegex(html, /"latitude":\s*([0-9.]+)/i) || '12.9210');
       const lng = parseFloat(this.extractRegex(html, /"longitude":\s*([0-9.]+)/i) || '80.1012');
 
       listings.push({
         id: `nb_${Date.now()}`,
         source: 'NoBroker',
-        title: title.replace(' | NoBroker', '').trim(),
+        title: title.replace(/\|?\s*NoBroker.*/i, '').trim(),
         rent,
         deposit,
         maintenance: 1000,
-        sqft,
-        bhk: '1 BHK',
-        furnishing: 'Unfurnished',
-        preferredTenant: 'Family / Bachelor',
-        locality: 'Tambaram / Perungalathur',
-        address: 'Mugavari 2nd street, Tambaram, Chennai',
+        sqft: sqftParsed || metrics.sqft,
+        bhk: bhkStr || metrics.bhk,
+        furnishing: 'Semi-Furnished',
+        preferredTenant: 'All',
+        locality: 'Chennai South',
+        address: 'Chennai South, Tamil Nadu',
         latitude: lat,
         longitude: lng,
         description: 'Listing imported from NoBroker.',
