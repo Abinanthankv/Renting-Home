@@ -140,6 +140,18 @@ class ListingScraper {
     let url = isUrl ? urlOrPayload.trim() : '';
 
     if (isUrl) {
+      if (url.includes('nobroker.in')) {
+        const nbResults = await this.parseNoBroker('', url);
+        if (nbResults && nbResults.length > 0 && nbResults[0].latitude && nbResults[0].latitude !== 0) {
+          return nbResults;
+        }
+      }
+      if (url.includes('99acres.com')) {
+        const acresResults = await this.parse99acres('', url);
+        if (acresResults && acresResults.length > 0 && acresResults[0].latitude && acresResults[0].latitude !== 0) {
+          return acresResults;
+        }
+      }
       rawHtml = await this.fetchUrlContent(url);
       if (!rawHtml) {
         console.log('Fetching failed, extracting property metadata from URL slug...');
@@ -329,18 +341,65 @@ class ListingScraper {
     return items;
   }
 
+  extractNoBrokerIdFromUrl(url) {
+    if (!url) return null;
+    const match = url.match(/\/([a-f0-9]{31,32})(?:\/|\?|$)/i) || url.match(/\/([a-f0-9]{31,32})/i);
+    if (match) return match[1].toLowerCase();
+    return null;
+  }
+
+  async fetchNoBrokerApi(id) {
+    if (!id) return null;
+    const candidateIds = [id];
+    if (id.length === 31) {
+      candidateIds.push(id + '1');
+      for (let c of '023456789abcdef') candidateIds.push(id + c);
+    }
+
+    for (const candId of candidateIds) {
+      const targetApi = `https://www.nobroker.in/api/v1/property/${candId}`;
+      const fetchTargets = [
+        targetApi,
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(targetApi)}`,
+        `https://corsproxy.io/?${encodeURIComponent(targetApi)}`
+      ];
+
+      for (const url of fetchTargets) {
+        try {
+          const res = await this.fetchWithTimeout(url, 2500);
+          if (res && res.ok) {
+            const json = await res.json();
+            if (json && json.data && json.data.id && (json.data.latitude || json.data.location)) {
+              return json.data;
+            }
+          }
+        } catch(e) {}
+      }
+    }
+    return null;
+  }
+
   async parseNoBroker(html, url) {
-    // 1. Try extracting raw JSON items directly from html/payload FIRST!
+    // 1. Try fetching exact property details via NoBroker API first if URL or ID exists!
+    const propId = this.extractNoBrokerIdFromUrl(url || html);
+    if (propId) {
+      const apiItem = await this.fetchNoBrokerApi(propId);
+      if (apiItem) {
+        return [this.formatNoBrokerItem(apiItem, url)];
+      }
+    }
+
+    // 2. Try extracting raw JSON items directly from html/payload FIRST!
     const jsonItems = this.extractNoBrokerJson(html);
     if (jsonItems && jsonItems.length > 0) {
       return jsonItems.map(item => this.formatNoBrokerItem(item, url));
     }
 
-    // 2. Direct regex match for lat and lon in raw html payload
+    // 3. Direct regex match for lat and lon in raw html payload
     const latMatch = this.extractRegex(html, /"latitude":\s*([0-9.-]+)/i);
     const lngMatch = this.extractRegex(html, /"longitude":\s*([0-9.-]+)/i);
 
-    // 3. If anti-bot HTML blocked fetch and we have a valid NoBroker URL, parse slug
+    // 4. If anti-bot HTML blocked fetch and we have a valid NoBroker URL, parse slug
     if (this.isAntiBotHtml(html) && url && url.includes('nobroker.in')) {
       const slugItems = await this.parseFromUrlSlug(url);
       if (slugItems && slugItems.length > 0 && latMatch && lngMatch) {
