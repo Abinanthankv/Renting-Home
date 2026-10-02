@@ -455,7 +455,7 @@ class ListingScraper {
           }
         }
         return null;
-      }).filter(Boolean).slice(0, 8);
+      }).filter(Boolean);
     }
 
     if (photos.length === 0) {
