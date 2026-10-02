@@ -358,23 +358,20 @@ class ListingScraper {
 
     for (const candId of candidateIds) {
       const targetApi = `https://www.nobroker.in/api/v1/property/${candId}`;
-      const fetchTargets = [
-        targetApi,
-        `https://api.allorigins.win/raw?url=${encodeURIComponent(targetApi)}`,
-        `https://corsproxy.io/?${encodeURIComponent(targetApi)}`
-      ];
-
-      for (const url of fetchTargets) {
-        try {
-          const res = await this.fetchWithTimeout(url, 2500);
-          if (res && res.ok) {
-            const json = await res.json();
-            if (json && json.data && json.data.id && (json.data.latitude || json.data.location)) {
-              return json.data;
-            }
+      try {
+        const res = await fetch(targetApi, {
+          headers: {
+            'Accept': 'application/json, text/plain, */*',
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
           }
-        } catch(e) {}
-      }
+        });
+        if (res && res.ok) {
+          const json = await res.json();
+          if (json && json.data && json.data.id && (json.data.latitude || json.data.location)) {
+            return json.data;
+          }
+        }
+      } catch(e) {}
     }
     return null;
   }
