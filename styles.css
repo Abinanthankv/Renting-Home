@@ -27,10 +27,9 @@
   --shadow-main: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+html {
+  height: 100%;
+  height: -webkit-fill-available;
 }
 
 body {
@@ -39,6 +38,9 @@ body {
   color: var(--text-main);
   height: 100vh;
   height: 100dvh;
+  min-height: -webkit-fill-available;
+  margin: 0;
+  padding: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -1120,11 +1122,17 @@ textarea.form-control {
 /* Mobile Responsiveness Breakpoints */
 @media (max-width: 768px) {
   body {
-    padding-bottom: 0;
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    overflow: hidden !important;
+    padding-bottom: 0 !important;
   }
   .app-header {
-    height: 54px;
-    padding: 0 12px;
+    height: 52px !important;
+    padding: 0 12px !important;
+    flex-shrink: 0 !important;
   }
   .header-actions .nav-tab-btn,
   .header-actions #exportDataBtn,
@@ -1132,11 +1140,13 @@ textarea.form-control {
     display: none !important;
   }
   .app-container {
-    flex-direction: column;
-    height: calc(100dvh - 54px - 60px - env(safe-area-inset-bottom, 0px));
-    width: 100%;
-    min-height: 0;
-    flex: 1;
+    flex: 1 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    width: 100% !important;
+    overflow: hidden !important;
+    position: relative !important;
+    flex-direction: column !important;
   }
   .view-section {
     display: none;
@@ -1144,6 +1154,8 @@ textarea.form-control {
     height: 100%;
     min-height: 0;
     flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
   .view-section.active {
     display: flex;
@@ -1156,13 +1168,17 @@ textarea.form-control {
   }
   .mobile-bottom-nav {
     display: flex !important;
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: calc(60px + env(safe-area-inset-bottom, 0px));
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-    z-index: 999999;
+    position: relative !important;
+    bottom: auto !important;
+    left: auto !important;
+    right: auto !important;
+    height: calc(56px + env(safe-area-inset-bottom, 0px)) !important;
+    padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+    flex-shrink: 0 !important;
+    z-index: 999999 !important;
+    background-color: var(--bg-sidebar) !important;
+    border-top: 1px solid var(--border-color) !important;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5) !important;
   }
   .match-view-header {
     flex-direction: column;
