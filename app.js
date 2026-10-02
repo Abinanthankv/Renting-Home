@@ -523,25 +523,28 @@ class AppController {
     const mapView = document.getElementById('mapView');
     const matchView = document.getElementById('matchView');
 
-    if (isMobile) {
-      if (listView) listView.style.display = viewName === 'list' ? 'flex' : 'none';
-      if (mapView) mapView.style.display = viewName === 'map' ? 'block' : 'none';
-      if (matchView) matchView.style.display = viewName === 'match' ? 'flex' : 'none';
-    } else {
-      if (viewName === 'match') {
-        if (listView) listView.style.display = 'none';
-        if (mapView) mapView.style.display = 'none';
-        if (matchView) matchView.style.display = 'flex';
-      } else {
-        if (listView) listView.style.display = 'flex';
-        if (mapView) mapView.style.display = 'block';
-        if (matchView) matchView.style.display = 'none';
-      }
+    const showList = isMobile ? viewName === 'list' : viewName !== 'match';
+    const showMap = isMobile ? viewName === 'map' : viewName !== 'match';
+    const showMatch = viewName === 'match';
+
+    if (listView) {
+      listView.classList.toggle('active', showList);
+      listView.style.display = showList ? 'flex' : 'none';
+    }
+
+    if (mapView) {
+      mapView.classList.toggle('active', showMap);
+      mapView.style.display = showMap ? 'block' : 'none';
+    }
+
+    if (matchView) {
+      matchView.classList.toggle('active', showMatch);
+      matchView.style.display = showMatch ? 'flex' : 'none';
     }
 
     if (window.mapController && window.mapController.map) {
-      setTimeout(() => window.mapController.map.invalidateSize(), 100);
-      setTimeout(() => window.mapController.map.invalidateSize(), 300);
+      setTimeout(() => window.mapController.map.invalidateSize(), 50);
+      setTimeout(() => window.mapController.map.invalidateSize(), 250);
     }
 
     if (viewName === 'match') {
