@@ -36,6 +36,15 @@ class AppController {
       }
 
       this.allProperties = await window.propertyDB.getAll();
+
+      // Seed initial Bethel Iellam property if database is currently empty
+      if (!this.allProperties || this.allProperties.length === 0) {
+        const seeded = await window.listingScraper.parseUrlOrPayload('https://www.nobroker.in/property/1-bhk-apartment-for-rent-in-new-perungalathur-chennai-for-rs-10000/8a9fb1827b49e8e6017b4a14933216b1/detail?nbFr=list-rent');
+        if (seeded && seeded.length > 0) {
+          await window.propertyDB.save(seeded[0]);
+          this.allProperties = await window.propertyDB.getAll();
+        }
+      }
     } catch (e) {
       console.warn('DB load error:', e);
     }
