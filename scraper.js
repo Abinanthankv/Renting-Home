@@ -141,15 +141,15 @@ class ListingScraper {
 
     if (isUrl) {
       rawHtml = await this.fetchUrlContent(url);
-      if (!rawHtml || this.isAntiBotHtml(rawHtml)) {
-        console.log('Extracting property metadata directly from URL slug...');
+      if (!rawHtml) {
+        console.log('Fetching failed, extracting property metadata from URL slug...');
         return await this.parseFromUrlSlug(url);
       }
     } else {
       rawHtml = urlOrPayload.trim();
     }
 
-    if (url.includes('nobroker.in') || rawHtml.includes('nobroker.in') || rawHtml.includes('nb.appState')) {
+    if (url.includes('nobroker.in') || rawHtml.includes('nobroker') || rawHtml.includes('propertyDetails') || rawHtml.includes('detailsData') || rawHtml.includes('nb.appState')) {
       return await this.parseNoBroker(rawHtml, url);
     } else if (url.includes('99acres.com') || rawHtml.includes('99acres.com') || rawHtml.includes('nnacres')) {
       return await this.parse99acres(rawHtml, url);
@@ -246,104 +246,216 @@ class ListingScraper {
     }];
   }
 
+  extractNoBrokerJson(text) {
+    if (!text) return [];
+    const items = [];
+
+    const processObject = (obj) => {
+      if (!obj || typeof obj !== 'object') return;
+
+      if (obj.detailsData && typeof obj.detailsData === 'object') {
+        items.push(obj.detailsData);
+      } else if (obj.propertyDetails && obj.propertyDetails.detailsData) {
+        items.push(obj.propertyDetails.detailsData);
+      }
+
+      if (obj.resultScreenReducer && Array.isArray(obj.resultScreenReducer.propertyList)) {
+        obj.resultScreenReducer.propertyList.forEach(p => items.push(p));
+      }
+
+      if (Array.isArray(obj.propertyList)) {
+        obj.propertyList.forEach(p => items.push(p));
+      }
+
+      if (obj.id && (obj.latitude || obj.location || obj.latLong) && (obj.rent || obj.propertyTitle)) {
+        items.push(obj);
+      }
+    };
+
+    let cleanText = text.trim();
+    if (cleanText.startsWith('"propertyDetails"') || cleanText.startsWith('"detailsData"')) {
+      cleanText = '{' + cleanText + '}';
+    }
+
+    try {
+      const parsed = JSON.parse(cleanText);
+      processObject(parsed);
+    } catch (e) {
+      const jsonMatches = text.match(/nb\.appState\s*=\s*(\{[\s\S]+?\});?\s*<\/script>/i) ||
+                          text.match(/window\.nb\.appState\s*=\s*(\{[\s\S]+?\});?\s*<\/script>/i) ||
+                          text.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i) ||
+                          text.match(/\{[\s\S]*"propertyDetails"[\s\S]*\}/i);
+
+      if (jsonMatches) {
+        try {
+          const parsed = JSON.parse(jsonMatches[1] || jsonMatches[0]);
+          processObject(parsed);
+        } catch (err) {}
+      }
+    }
+
+    if (items.length === 0) {
+      const kw = text.includes('"detailsData"') ? '"detailsData"' : (text.includes('"propertyDetails"') ? '"propertyDetails"' : null);
+      if (kw) {
+        const idx = text.indexOf(kw);
+        const braceStart = text.indexOf('{', idx);
+        if (braceStart !== -1) {
+          let count = 0;
+          let braceEnd = -1;
+          for (let i = braceStart; i < text.length; i++) {
+            if (text[i] === '{') count++;
+            else if (text[i] === '}') {
+              count--;
+              if (count === 0) {
+                braceEnd = i;
+                break;
+              }
+            }
+          }
+          if (braceEnd !== -1) {
+            try {
+              const extractedObj = JSON.parse(text.substring(braceStart, braceEnd + 1));
+              if (kw === '"detailsData"') {
+                items.push(extractedObj);
+              } else if (extractedObj.detailsData) {
+                items.push(extractedObj.detailsData);
+              }
+            } catch (e) {}
+          }
+        }
+      }
+    }
+
+    return items;
+  }
+
   async parseNoBroker(html, url) {
+    // 1. Try extracting raw JSON items directly from html/payload FIRST!
+    const jsonItems = this.extractNoBrokerJson(html);
+    if (jsonItems && jsonItems.length > 0) {
+      return jsonItems.map(item => this.formatNoBrokerItem(item, url));
+    }
+
+    // 2. Direct regex match for lat and lon in raw html payload
+    const latMatch = this.extractRegex(html, /"latitude":\s*([0-9.-]+)/i);
+    const lngMatch = this.extractRegex(html, /"longitude":\s*([0-9.-]+)/i);
+
+    // 3. If anti-bot HTML blocked fetch and we have a valid NoBroker URL, parse slug
     if (this.isAntiBotHtml(html) && url && url.includes('nobroker.in')) {
-      return await this.parseFromUrlSlug(url);
-    }
-
-    const listings = [];
-
-    const appStateMatch = html.match(/nb\.appState\s*=\s*(\{.+?\});?\s*<\/script>/s) ||
-                          html.match(/window\.nb\.appState\s*=\s*(\{.+?\});?\s*<\/script>/s) ||
-                          html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>(.*?)<\/script>/s);
-
-    if (appStateMatch) {
-      try {
-        const jsonText = appStateMatch[1] || appStateMatch[0];
-        const state = JSON.parse(jsonText);
-        
-        if (state.propertyDetails && state.propertyDetails.detailsData) {
-          const item = state.propertyDetails.detailsData;
-          listings.push(this.formatNoBrokerItem(item, url));
-        }
-
-        if (state.resultScreenReducer && Array.isArray(state.resultScreenReducer.propertyList)) {
-          state.resultScreenReducer.propertyList.forEach(item => {
-            listings.push(this.formatNoBrokerItem(item, url));
-          });
-        }
-      } catch (e) {
-        console.warn('Failed parsing NoBroker JSON script tag:', e);
-      }
-    }
-
-    if (listings.length === 0 && url && url.includes('nobroker.in')) {
       const slugItems = await this.parseFromUrlSlug(url);
-      if (slugItems && slugItems.length > 0) {
-        const item = slugItems[0];
-        
-        const htmlTitle = this.extractRegex(html, /<title[^>]*>(.*?)<\/title>/i);
-        if (htmlTitle && !this.isAntiBotTitle(htmlTitle)) {
-          item.title = htmlTitle.replace(/\|?\s*NoBroker.*/i, '').trim();
-        }
-
-        const latMatch = this.extractRegex(html, /"latitude":\s*([0-9.-]+)/i);
-        const lngMatch = this.extractRegex(html, /"longitude":\s*([0-9.-]+)/i);
-        if (latMatch && lngMatch) {
-          item.latitude = parseFloat(latMatch);
-          item.longitude = parseFloat(lngMatch);
-        }
-
-        const photoMatches = html.match(/https:\/\/images\.nobroker\.in\/images\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9._-]+\.jpg/g);
-        if (photoMatches && photoMatches.length > 0) {
-          item.photos = Array.from(new Set(photoMatches)).slice(0, 8);
-        }
-
-        listings.push(item);
+      if (slugItems && slugItems.length > 0 && latMatch && lngMatch) {
+        slugItems[0].latitude = parseFloat(latMatch);
+        slugItems[0].longitude = parseFloat(lngMatch);
       }
+      return slugItems;
     }
 
-    if (listings.length === 0) {
-      return await this.parseGeneric(html, url);
-    }
-
-    return listings;
+    return await this.parseGeneric(html, url);
   }
 
   formatNoBrokerItem(item, originalUrl) {
-    const lat = parseFloat(item.latitude || item.lat || (item.location ? item.location.split(',')[0] : 0) || (item.latLong ? item.latLong.split(',')[0] : 0));
-    const lng = parseFloat(item.longitude || item.lon || item.lng || (item.location ? item.location.split(',')[1] : 0) || (item.latLong ? item.latLong.split(',')[1] : 0));
+    let lat = 0;
+    let lng = 0;
+
+    if (typeof item.latitude === 'number') lat = item.latitude;
+    else if (item.latitude) lat = parseFloat(item.latitude);
+
+    if (typeof item.longitude === 'number') lng = item.longitude;
+    else if (item.longitude) lng = parseFloat(item.longitude);
+
+    if ((!lat || !lng) && item.location && typeof item.location === 'string') {
+      const parts = item.location.split(',');
+      if (parts.length >= 2) {
+        lat = parseFloat(parts[0]);
+        lng = parseFloat(parts[1]);
+      }
+    }
+
+    if ((!lat || !lng) && item.latLong && typeof item.latLong === 'string') {
+      const parts = item.latLong.split(',');
+      if (parts.length >= 2) {
+        lat = parseFloat(parts[0]);
+        lng = parseFloat(parts[1]);
+      }
+    }
 
     let photos = [];
-    if (Array.isArray(item.photos)) {
+    if (Array.isArray(item.photos) && item.photos.length > 0) {
       photos = item.photos.map(p => {
-        if (p.imagesMap && p.imagesMap.large) {
-          return p.imagesMap.large.startsWith('http') ? p.imagesMap.large : `https://images.nobroker.in/images/${item.id}/${p.imagesMap.large}`;
+        if (!p) return null;
+        if (typeof p === 'string') {
+          return p.startsWith('//') ? `https:${p}` : (p.startsWith('http') ? p : `https://assets.nobroker.in/images/${item.id}/${p}`);
         }
-        return 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?w=800&auto=format&fit=crop';
-      }).slice(0, 8);
+        if (p.imagesMap) {
+          const fn = p.imagesMap.large || p.imagesMap.original || p.imagesMap.medium || p.imagesMap.thumbnail;
+          if (fn) {
+            if (fn.startsWith('http')) return fn;
+            if (fn.startsWith('//')) return `https:${fn}`;
+            if (fn.startsWith('/')) return `https://assets.nobroker.in${fn}`;
+            return `https://assets.nobroker.in/images/${item.id}/${fn}`;
+          }
+        }
+        return null;
+      }).filter(Boolean).slice(0, 8);
+    }
+
+    if (photos.length === 0) {
+      if (item.originalImageUrl) {
+        const url = item.originalImageUrl.startsWith('//') ? `https:${item.originalImageUrl}` : item.originalImageUrl;
+        photos.push(url);
+      } else if (item.thumbnailImage) {
+        photos.push(item.thumbnailImage);
+      }
+    }
+
+    if (photos.length === 0) {
+      photos.push('https://images.unsplash.com/photo-1560518883-ce09059eeffa?w=800&auto=format&fit=crop');
     }
 
     const rent = item.rent || item.rentAmount || item.formattedRent || 0;
     const deposit = item.deposit || item.depositAmount || 0;
+    const maintenance = item.maintenanceAmount || 0;
+    const sqft = item.propertySize || item.sqft || 0;
+
+    let bhk = item.typeDesc || item.type || 'N/A';
+    if (bhk === 'BHK1') bhk = '1 BHK';
+    else if (bhk === 'BHK2') bhk = '2 BHK';
+    else if (bhk === 'BHK3') bhk = '3 BHK';
+    else if (bhk === 'BHK4') bhk = '4 BHK';
+
+    let furnishing = item.furnishingDesc || item.furnishing || 'N/A';
+    if (furnishing === 'NOT_FURNISHED') furnishing = 'Unfurnished';
+    else if (furnishing === 'SEMI_FURNISHED') furnishing = 'Semi-Furnished';
+    else if (furnishing === 'FULLY_FURNISHED') furnishing = 'Fully Furnished';
+
+    let preferredTenant = 'All';
+    if (Array.isArray(item.leaseTypeNew) && item.leaseTypeNew.length > 0) {
+      preferredTenant = item.leaseTypeNew.map(t => t === 'ANYONE' ? 'All' : t).join(', ');
+    } else if (item.leaseType) {
+      preferredTenant = item.leaseType === 'ANYONE' ? 'All' : item.leaseType;
+    }
+
+    const locality = item.locality || item.nbLocality || 'Chennai';
+    const address = item.address || item.completeStreetName || item.secondaryTitle || item.street || `${locality}, Chennai`;
+    const title = item.propertyTitle || item.title || `${bhk} House for Rent in ${locality}`;
 
     return {
       id: `nb_${item.id || Date.now()}`,
       source: 'NoBroker',
-      title: item.propertyTitle || item.title || `${item.typeDesc || ''} House for Rent in ${item.locality || 'Chennai'}`,
+      title,
       rent,
       deposit,
-      maintenance: item.maintenanceAmount || 0,
-      sqft: item.propertySize || 0,
-      bhk: item.typeDesc || item.type || 'N/A',
-      furnishing: item.furnishingDesc || item.furnishing || 'N/A',
-      preferredTenant: Array.isArray(item.leaseTypeNew) ? item.leaseTypeNew.join(', ') : (item.leaseType || 'All'),
-      locality: item.locality || item.nbLocality || 'Chennai',
-      address: item.address || item.completeStreetName || item.secondaryTitle || 'Chennai',
+      maintenance,
+      sqft,
+      bhk,
+      furnishing,
+      preferredTenant,
+      locality,
+      address,
       latitude: lat,
       longitude: lng,
       description: item.combineDescription || item.description || item.ownerDescription || 'No description provided.',
-      photos: photos.length ? photos : ['https://images.unsplash.com/photo-1560518883-ce09059eeffa?w=800&auto=format&fit=crop'],
+      photos,
       url: item.detailUrl ? `https://www.nobroker.in${item.detailUrl}` : (originalUrl || 'https://www.nobroker.in'),
       createdAt: Date.now()
     };
