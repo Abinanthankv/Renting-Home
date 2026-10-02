@@ -324,7 +324,32 @@ class MapController {
     this.renderNearbyMarkers(nearbyResults);
     this.updateNearbyDOMList(nearbyResults);
 
-    // 3. Dynamically Query OpenStreetMap Overpass API Mirrors for Live Schools, Hospitals, Bus Stops & Colleges
+    // 3. Check LocalStorage Cache for Overpass Amenities (Drastically reduces network calls!)
+    const cacheKey = `overpass_amenities_${lat.toFixed(3)}_${lng.toFixed(3)}`;
+    try {
+      const cachedAmenities = localStorage.getItem(cacheKey);
+      if (cachedAmenities) {
+        const parsed = JSON.parse(cachedAmenities);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          console.log(`[RentRadar] Loaded ${parsed.length} nearby amenities from local cache for (${lat.toFixed(3)}, ${lng.toFixed(3)})`);
+          parsed.forEach(item => {
+            const isDuplicate = nearbyResults.some(r => r.name.toLowerCase().trim() === item.name.toLowerCase().trim());
+            if (!isDuplicate) {
+              nearbyResults.push(item);
+            }
+          });
+
+          nearbyResults.sort((a, b) => a.distanceKm - b.distanceKm);
+          this.renderNearbyMarkers(nearbyResults);
+          this.updateNearbyDOMList(nearbyResults);
+          return; // Skip network call completely!
+        }
+      }
+    } catch (e) {
+      console.warn('[RentRadar] LocalStorage cache read failed:', e);
+    }
+
+    // 4. Dynamically Query OpenStreetMap Overpass API Mirrors if not cached
     const overpassQuery = `[out:json][timeout:10];
       (
         node["amenity"="hospital"](around:3500,${lat},${lng});
@@ -347,6 +372,8 @@ class MapController {
         if (res.ok) {
           const data = await res.json();
           if (data && Array.isArray(data.elements)) {
+            const fetchedAmenities = [];
+
             data.elements.forEach(el => {
               const rawName = el.tags ? (el.tags.name || el.tags['name:en']) : null;
               if (rawName && rawName.trim().length > 2) {
@@ -359,22 +386,34 @@ class MapController {
                 else if (el.tags.amenity === 'school' || el.tags.amenity === 'college') amenityType = 'school';
                 else if (el.tags.amenity === 'hospital' || el.tags.amenity === 'pharmacy') amenityType = 'hospital';
 
+                const amenityObj = {
+                  name: rawName,
+                  type: amenityType,
+                  lat: elLat,
+                  lng: elLng,
+                  distanceKm: parseFloat(distKm.toFixed(2)),
+                  walkTimeMin: Math.round(distKm * 12)
+                };
+
+                fetchedAmenities.push(amenityObj);
+
                 const isDuplicate = nearbyResults.some(r =>
                   r.name.toLowerCase().trim() === rawName.toLowerCase().trim()
                 );
 
                 if (!isDuplicate) {
-                  nearbyResults.push({
-                    name: rawName,
-                    type: amenityType,
-                    lat: elLat,
-                    lng: elLng,
-                    distanceKm: parseFloat(distKm.toFixed(2)),
-                    walkTimeMin: Math.round(distKm * 12)
-                  });
+                  nearbyResults.push(amenityObj);
                 }
               }
             });
+
+            // Cache fetched amenities to LocalStorage for zero-network future lookups!
+            try {
+              localStorage.setItem(cacheKey, JSON.stringify(fetchedAmenities));
+              console.log(`[RentRadar] Cached ${fetchedAmenities.length} amenities to LocalStorage (${cacheKey})`);
+            } catch (e) {
+              console.warn('[RentRadar] LocalStorage save quota exceeded:', e);
+            }
 
             // Re-sort all items (railways + dynamic amenities) by distance
             nearbyResults.sort((a, b) => a.distanceKm - b.distanceKm);
