@@ -63,8 +63,9 @@ class ListingScraper {
       if (match) bhkCount = parseInt(match[1], 10);
     }
     
-    if (!bhkCount && sqftInput) {
-      const sq = parseInt(sqftInput, 10);
+    let sq = sqftInput ? parseInt(sqftInput, 10) : 0;
+
+    if (!bhkCount && sq) {
       if (sq <= 750) bhkCount = 1;
       else if (sq <= 1100) bhkCount = 2;
       else if (sq <= 1600) bhkCount = 3;
@@ -73,36 +74,26 @@ class ListingScraper {
 
     if (!bhkCount) bhkCount = 2; // default 2 BHK if nothing given
 
-    let defaultRent = 22000;
-    let defaultSqft = 1000;
-
-    switch (bhkCount) {
-      case 1:
-        defaultRent = 16000;
-        defaultSqft = 700;
-        break;
-      case 2:
-        defaultRent = 22000;
-        defaultSqft = 1000;
-        break;
-      case 3:
-        defaultRent = 35000;
-        defaultSqft = 1500;
-        break;
-      case 4:
-      default:
-        defaultRent = 50000;
-        defaultSqft = 2000;
-        break;
+    if (!sq) {
+      switch (bhkCount) {
+        case 1: sq = 700; break;
+        case 2: sq = 1000; break;
+        case 3: sq = 1500; break;
+        case 4: default: sq = 2000; break;
+      }
     }
 
-    const finalSqft = (sqftInput && parseInt(sqftInput, 10) > 0) ? parseInt(sqftInput, 10) : defaultSqft;
-    
+    // Dynamic rate calculation based on carpet area (sqft)
+    // Local market average rate for South Chennai suburban rentals is ~₹22.85 / sqft
+    const rawRent = sq * 22.85;
+    const rent = Math.round(rawRent / 500) * 500; // round to nearest ₹500
+    const deposit = rent * 3; // standard 3 months deposit
+
     return {
       bhk: `${bhkCount} BHK`,
-      rent: defaultRent,
-      deposit: defaultRent * 3, // standard 3 months deposit
-      sqft: finalSqft
+      rent: Math.max(8000, rent),
+      deposit: Math.max(24000, deposit),
+      sqft: sq
     };
   }
 
