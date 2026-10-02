@@ -255,6 +255,17 @@ class MapController {
     setTimeout(() => {
       if (this.map) this.map.invalidateSize();
     }, 100);
+
+    // Automatically load & display nearby amenities (railways, theaters, petrol bunks, schools) on map load
+    this.loadAllAreaAmenities(properties);
+  }
+
+  async loadAllAreaAmenities(properties) {
+    if (!properties || properties.length === 0) return;
+    const mainProp = properties[0];
+    if (mainProp && mainProp.latitude && mainProp.longitude) {
+      await this.fetchNearbyAmenities(mainProp.latitude, mainProp.longitude);
+    }
   }
 
   async highlightProperty(prop) {
@@ -354,13 +365,15 @@ class MapController {
     // 4. Dynamically Query OpenStreetMap Overpass API Mirrors if not cached
     const overpassQuery = `[out:json][timeout:10];
       (
+        node["amenity"="cinema"](around:5000,${lat},${lng});
+        node["amenity"="fuel"](around:3500,${lat},${lng});
         node["amenity"="hospital"](around:3500,${lat},${lng});
         node["amenity"="school"](around:3000,${lat},${lng});
         node["highway"="bus_stop"](around:2500,${lat},${lng});
         node["amenity"="college"](around:4000,${lat},${lng});
         node["amenity"="pharmacy"](around:2500,${lat},${lng});
       );
-      out body 25;`;
+      out body 35;`;
 
     const mirrors = [
       'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
@@ -385,6 +398,8 @@ class MapController {
 
                 let amenityType = 'hospital';
                 if (el.tags.highway === 'bus_stop') amenityType = 'bus';
+                else if (el.tags.amenity === 'cinema' || el.tags.building === 'cinema') amenityType = 'cinema';
+                else if (el.tags.amenity === 'fuel') amenityType = 'fuel';
                 else if (el.tags.amenity === 'school' || el.tags.amenity === 'college') amenityType = 'school';
                 else if (el.tags.amenity === 'hospital' || el.tags.amenity === 'pharmacy') amenityType = 'hospital';
 
@@ -440,6 +455,8 @@ class MapController {
       let bgColor = '#3b82f6';
       if (place.type === 'bus') { iconSymbol = '🚌'; bgColor = '#f59e0b'; }
       if (place.type === 'metro') { iconSymbol = '🚇'; bgColor = '#8b5cf6'; }
+      if (place.type === 'cinema') { iconSymbol = '🎬'; bgColor = '#ec4899'; }
+      if (place.type === 'fuel') { iconSymbol = '⛽'; bgColor = '#06b6d4'; }
       if (place.type === 'hospital') { iconSymbol = '🏥'; bgColor = '#ef4444'; }
       if (place.type === 'school') { iconSymbol = '🏫'; bgColor = '#10b981'; }
 
@@ -479,6 +496,8 @@ class MapController {
       let icon = 'train-front';
       let badgeClass = 'badge-blue';
       if (p.type === 'bus') { icon = 'bus'; badgeClass = 'badge-amber'; }
+      if (p.type === 'cinema') { icon = 'clapperboard'; badgeClass = 'badge-pink'; }
+      if (p.type === 'fuel') { icon = 'fuel'; badgeClass = 'badge-cyan'; }
       if (p.type === 'hospital') { icon = 'activity'; badgeClass = 'badge-rose'; }
       if (p.type === 'school') { icon = 'graduation-cap'; badgeClass = 'badge-emerald'; }
 

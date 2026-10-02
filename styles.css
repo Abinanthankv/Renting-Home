@@ -735,6 +735,8 @@ body {
 .badge-amber { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
 .badge-rose { background: rgba(239, 68, 68, 0.2); color: #f87171; }
 .badge-emerald { background: rgba(16, 185, 129, 0.2); color: #34d399; }
+.badge-pink { background: rgba(236, 72, 153, 0.2); color: #f472b6; }
+.badge-cyan { background: rgba(6, 182, 212, 0.2); color: #22d3ee; }
 
 .nearby-item-info {
   flex: 1;
