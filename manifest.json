@@ -1,0 +1,22 @@
+{
+  "name": "Rent Radar - Property Tracker & Map",
+  "short_name": "Rent Radar",
+  "description": "Scrape, save, and analyze NoBroker & 99acres rental listings with nearby transport radar and interactive map view.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#6366f1",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/609/609803.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/609/609803.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

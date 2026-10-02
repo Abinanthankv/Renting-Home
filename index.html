@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rent Radar - Rental Property Scraper, Map & Transit Tracker</title>
+  
+  <!-- PWA Manifest & Meta -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#6366f1" />
+  <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/609/609803.png" />
+
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+
+  <!-- Lucide Icons -->
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.344.0/dist/umd/lucide.min.js"></script>
+
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- App Header -->
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-icon">
+        <i data-lucide="compass"></i>
+      </div>
+      <span>Rent Radar</span>
+    </div>
+
+    <div class="header-actions">
+      <button class="btn btn-primary" id="openImportModalBtn">
+        <i data-lucide="plus"></i>
+        <span>Add Listing</span>
+      </button>
+      <button class="btn btn-secondary btn-icon" id="exportDataBtn" title="Export Backup JSON">
+        <i data-lucide="download"></i>
+      </button>
+      <button class="btn btn-secondary btn-icon" id="importDataBtn" title="Import Backup JSON">
+        <i data-lucide="upload"></i>
+      </button>
+      <input type="file" id="importFileInput" accept=".json" style="display: none;" />
+      <button class="btn btn-secondary" id="installPwaBtn" style="display: none;">
+        <i data-lucide="smartphone"></i>
+        <span>Install PWA</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Split Layout -->
+  <main class="app-container">
+
+    <!-- Left Sidebar: Property Feed & Filters -->
+    <aside class="sidebar">
+      <div class="filter-section">
+        <div class="search-input-wrap">
+          <i data-lucide="search"></i>
+          <input type="text" class="search-input" id="searchInput" placeholder="Search by locality, BHK, or title..." />
+        </div>
+
+        <div class="filter-pills" id="filterPills">
+          <button class="pill active" data-filter="all">All Properties</button>
+          <button class="pill" data-filter="NoBroker">NoBroker</button>
+          <button class="pill" data-filter="99acres">99acres</button>
+          <button class="pill" data-filter="under15k">&lt; ₹15,000</button>
+          <button class="pill" data-filter="1bhk">1 BHK</button>
+          <button class="pill" data-filter="2bhk+">2+ BHK</button>
+        </div>
+      </div>
+
+      <div class="listings-feed" id="listingsFeed">
+        <!-- Listings inserted dynamically via app.js -->
+      </div>
+    </aside>
+
+    <!-- Right Area: Interactive Map -->
+    <section class="map-container">
+      <div id="map"></div>
+    </section>
+
+    <!-- Slide-over Property Detail Drawer -->
+    <div class="detail-drawer" id="detailDrawer">
+      <div class="drawer-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span class="card-source-badge" id="drawerSourceBadge">NoBroker</span>
+          <span style="font-size: 0.8rem; color: var(--text-muted);" id="drawerDate">Saved today</span>
+        </div>
+        <button class="btn btn-secondary btn-icon" id="closeDrawerBtn">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+
+      <div class="drawer-content" id="drawerContent">
+        <!-- Drawer content inserted dynamically -->
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Scraper & Import Modal -->
+  <div class="modal-overlay" id="importModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 style="font-size: 1.1rem; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+          <i data-lucide="link" style="color: var(--primary);"></i> Add Listing / Scrape URL
+        </h3>
+        <button class="btn btn-secondary btn-icon" id="closeImportModalBtn">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <div class="tab-buttons">
+          <button class="tab-btn active" id="tabUrlBtn">URL Scraper</button>
+          <button class="tab-btn" id="tabPasteBtn">Raw Paste</button>
+          <button class="tab-btn" id="tabManualBtn">Manual Entry</button>
+          <button class="tab-btn" id="tabPresetsBtn">Demo Presets</button>
+        </div>
+
+        <!-- Tab 1: URL Scraper -->
+        <div class="tab-content" id="tabUrlContent">
+          <div class="form-group">
+            <label class="form-label">NoBroker or 99acres Listing / Search URL:</label>
+            <input type="url" class="form-control" id="urlInput" placeholder="https://www.nobroker.in/property/... or https://www.99acres.com/..." />
+          </div>
+          <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 6px;">
+            Supports single detail URLs or search result URLs from NoBroker & 99acres.
+          </p>
+        </div>
+
+        <!-- Tab 2: Raw HTML/JSON Paste -->
+        <div class="tab-content" id="tabPasteContent" style="display: none;">
+          <div class="form-group">
+            <label class="form-label">Paste Raw Page HTML or JSON payload:</label>
+            <textarea class="form-control" id="pasteInput" placeholder="Paste page HTML (Ctrl+U) or JSON payload here..."></textarea>
+          </div>
+        </div>
+
+        <!-- Tab 3: Manual Entry -->
+        <div class="tab-content" id="tabManualContent" style="display: none;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div class="form-group" style="grid-column: span 2;">
+              <label class="form-label">Property Title:</label>
+              <input type="text" class="form-control" id="manualTitle" placeholder="e.g. 2 BHK House for Rent in Tambaram" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Rent (₹/mo):</label>
+              <input type="number" class="form-control" id="manualRent" placeholder="15000" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Deposit (₹):</label>
+              <input type="number" class="form-control" id="manualDeposit" placeholder="60000" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">BHK Type:</label>
+              <select class="form-control" id="manualBhk">
+                <option value="1 BHK">1 BHK</option>
+                <option value="2 BHK" selected>2 BHK</option>
+                <option value="3 BHK">3 BHK</option>
+                <option value="4 BHK">4 BHK</option>
+                <option value="1 RK">1 RK</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Locality / Area:</label>
+              <input type="text" class="form-control" id="manualLocality" placeholder="e.g. Tambaram West" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Latitude:</label>
+              <input type="number" step="any" class="form-control" id="manualLat" placeholder="12.9250" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Longitude:</label>
+              <input type="number" step="any" class="form-control" id="manualLng" placeholder="80.1000" />
+            </div>
+            <div class="form-group" style="grid-column: span 2;">
+              <label class="form-label">Photo Image URL (Optional):</label>
+              <input type="url" class="form-control" id="manualPhoto" placeholder="https://..." />
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 4: Presets -->
+        <div class="tab-content" id="tabPresetsContent" style="display: none;">
+          <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 12px;">
+            Load sample listings from research (Perungalathur & Tambaram, Chennai):
+          </p>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <button class="btn btn-secondary" id="presetNoBroker1Bhk" style="justify-content: flex-start;">
+              <i data-lucide="home"></i> Load NoBroker 1 BHK Tambaram (₹13,500/mo)
+            </button>
+            <button class="btn btn-secondary" id="preset99acres4Bhk" style="justify-content: flex-start;">
+              <i data-lucide="home"></i> Load 99acres 4 BHK Villa Old Perungalathur (₹50,000/mo)
+            </button>
+            <button class="btn btn-secondary" id="presetSathyaFlat" style="justify-content: flex-start;">
+              <i data-lucide="home"></i> Load 1 BHK Sathya Flats East Tambaram (₹9,000/mo)
+            </button>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px;">
+          <button class="btn btn-secondary" id="cancelImportBtn">Cancel</button>
+          <button class="btn btn-primary" id="startScrapeBtn">
+            <i data-lucide="download-cloud"></i>
+            <span id="scrapeBtnText">Scrape & Save</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- App Scripts -->
+  <script src="db.js"></script>
+  <script src="scraper.js"></script>
+  <script src="map.js"></script>
+  <script src="app.js"></script>
+
+</body>
+</html>
